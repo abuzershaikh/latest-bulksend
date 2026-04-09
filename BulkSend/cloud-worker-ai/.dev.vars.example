@@ -1,0 +1,4 @@
+GEMINI_API_KEY=your-gemini-api-key
+CHATSPROMO_GEMINI_MODEL=gemini-2.5-flash
+# Optional. If set, Android must send the same value as CHATSPROMO_WORKER_CLIENT_TOKEN.
+CHATSPROMO_WORKER_CLIENT_TOKEN=

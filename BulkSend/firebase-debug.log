@@ -1,0 +1,55 @@
+[debug] [2026-03-27T02:02:57.630Z] ----------------------------------------------------------------------
+[debug] [2026-03-27T02:02:57.633Z] Command:       D:\node.exe C:\Users\azers\AppData\Roaming\npm\node_modules\firebase-tools\lib\bin\firebase.js use
+[debug] [2026-03-27T02:02:57.634Z] CLI Version:   15.0.0
+[debug] [2026-03-27T02:02:57.634Z] Platform:      win32
+[debug] [2026-03-27T02:02:57.634Z] Node Version:  v24.14.0
+[debug] [2026-03-27T02:02:57.634Z] Time:          Fri Mar 27 2026 07:32:57 GMT+0530 (India Standard Time)
+[debug] [2026-03-27T02:02:57.634Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2026-03-27T02:02:57.636Z] >>> [apiv2][query] GET https://firebase-public.firebaseio.com/cli.json [none]
+[debug] [2026-03-27T02:02:57.680Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-03-27T02:02:57.681Z] > authorizing via signed-in user (abuzershaikhar@gmail.com)
+[debug] [2026-03-27T02:02:57.643Z] ----------------------------------------------------------------------
+[debug] [2026-03-27T02:02:57.646Z] Command:       D:\node.exe C:\Users\azers\AppData\Roaming\npm\node_modules\firebase-tools\lib\bin\firebase.js projects:list
+[debug] [2026-03-27T02:02:57.646Z] CLI Version:   15.0.0
+[debug] [2026-03-27T02:02:57.646Z] Platform:      win32
+[debug] [2026-03-27T02:02:57.646Z] Node Version:  v24.14.0
+[debug] [2026-03-27T02:02:57.646Z] Time:          Fri Mar 27 2026 07:32:57 GMT+0530 (India Standard Time)
+[debug] [2026-03-27T02:02:57.646Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2026-03-27T02:02:57.649Z] >>> [apiv2][query] GET https://firebase-public.firebaseio.com/cli.json [none]
+[debug] [2026-03-27T02:02:57.687Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-03-27T02:02:57.688Z] > authorizing via signed-in user (abuzershaikhar@gmail.com)
+[debug] [2026-03-27T02:02:57.691Z] Checked if tokens are valid: false, expires at: 1772971570164
+[debug] [2026-03-27T02:02:57.691Z] Checked if tokens are valid: false, expires at: 1772971570164
+[debug] [2026-03-27T02:02:57.691Z] > refreshing access token with scopes: []
+[debug] [2026-03-27T02:02:57.693Z] >>> [apiv2][query] POST https://www.googleapis.com/oauth2/v3/token [none]
+[debug] [2026-03-27T02:02:57.693Z] >>> [apiv2][body] POST https://www.googleapis.com/oauth2/v3/token [omitted]
+[error] 
+[error] Error: firebase use must be run from a Firebase project directory.
+
+Run firebase init to start a project directory in the current folder.
+[debug] [2026-03-27T02:02:57.807Z] <<< [apiv2][status] POST https://www.googleapis.com/oauth2/v3/token 200
+[debug] [2026-03-27T02:02:57.807Z] <<< [apiv2][body] POST https://www.googleapis.com/oauth2/v3/token [omitted]
+[debug] [2026-03-27T02:02:57.830Z] >>> [apiv2][query] GET https://firebase.googleapis.com/v1beta1/projects pageSize=1000
+[debug] [2026-03-27T02:02:58.258Z] <<< [apiv2][status] GET https://firebase-public.firebaseio.com/cli.json 200
+[debug] [2026-03-27T02:02:58.258Z] <<< [apiv2][body] GET https://firebase-public.firebaseio.com/cli.json {"cloudBuildErrorAfter":1594252800000,"cloudBuildWarnAfter":1590019200000,"defaultNode10After":1594252800000,"minVersion":"3.0.5","node8DeploysDisabledAfter":1613390400000,"node8RuntimeDisabledAfter":1615809600000,"node8WarnAfter":1600128000000}
+[debug] [2026-03-27T02:02:58.455Z] <<< [apiv2][status] GET https://firebase.googleapis.com/v1beta1/projects 200
+[debug] [2026-03-27T02:02:58.455Z] <<< [apiv2][body] GET https://firebase.googleapis.com/v1beta1/projects [omitted]
+[info] ┌──────────────────────┬────────────────────────┬────────────────┬──────────────────────┐
+│ Project Display Name │ Project ID             │ Project Number │ Resource Location ID │
+├──────────────────────┼────────────────────────┼────────────────┼──────────────────────┤
+│ BuildForm            │ buildform-ae597        │ 241883539444   │ [Not specified]      │
+├──────────────────────┼────────────────────────┼────────────────┼──────────────────────┤
+│ bulkbox360           │ chatspromo             │ 148146046101   │ [Not specified]      │
+├──────────────────────┼────────────────────────┼────────────────┼──────────────────────┤
+│ Chatspromos          │ mailtracker-demo       │ 1003974305237  │ [Not specified]      │
+├──────────────────────┼────────────────────────┼────────────────┼──────────────────────┤
+│ zestgrab             │ sheets-webhook-addon   │ 842420561641   │ [Not specified]      │
+├──────────────────────┼────────────────────────┼────────────────┼──────────────────────┤
+│ Task                 │ studio-775502762-93cca │ 950035858765   │ [Not specified]      │
+├──────────────────────┼────────────────────────┼────────────────┼──────────────────────┤
+│ yt keyword           │ yt-keyword-ad971       │ 1004237046450  │ [Not specified]      │
+└──────────────────────┴────────────────────────┴────────────────┴──────────────────────┘
+[info] 
+[info] 6 project(s) total.
