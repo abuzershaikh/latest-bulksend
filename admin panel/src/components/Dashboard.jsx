@@ -3,10 +3,13 @@ import { signOut } from 'firebase/auth';
 import { collection, onSnapshot } from 'firebase/firestore';
 import { auth, db } from '../firebase';
 import ActivationsScreen from './ActivationsScreen';
+import BalancesScreen from './BalancesScreen';
 import { BottomNav, StatusBanner, TopBar } from './AdminUi';
-import { buildManagers, buildStats, buildUsers, tabs } from './adminData';
+import { buildManagerActivations, buildManagers, buildStats, buildUsers, tabs } from './adminData';
 import DashboardHome from './DashboardHome';
+import ManagerReceiptsScreen from './ManagerReceiptsScreen';
 import ManagersScreen from './ManagersScreen';
+import { markManagerActivationReceived } from './managerPayments';
 import UserDetailPanel from './UserDetailPanel';
 import UsersScreen from './UsersScreen';
 
@@ -15,9 +18,11 @@ export default function Dashboard() {
     const [emailDocs, setEmailDocs] = useState([]);
     const [detailDocs, setDetailDocs] = useState([]);
     const [managerDocs, setManagerDocs] = useState([]);
-    const [loading, setLoading] = useState({ email: true, details: true, managers: true });
+    const [managerActivationDocs, setManagerActivationDocs] = useState([]);
+    const [loading, setLoading] = useState({ email: true, details: true, managers: true, receipts: true });
     const [errors, setErrors] = useState({});
     const [selectedUserId, setSelectedUserId] = useState(null);
+    const [busyActivationId, setBusyActivationId] = useState('');
 
     useEffect(() => {
         const unsubscribeEmailData = onSnapshot(
@@ -62,25 +67,67 @@ export default function Dashboard() {
             },
         );
 
+        const unsubscribeManagerActivations = onSnapshot(
+            collection(db, 'managerActivations'),
+            (snapshot) => {
+                setManagerActivationDocs(snapshot.docs.map((doc) => ({ id: doc.id, data: doc.data() })));
+                setErrors((current) => ({ ...current, receipts: '' }));
+                setLoading((current) => ({ ...current, receipts: false }));
+            },
+            (error) => {
+                console.error('Error fetching managerActivations:', error);
+                setErrors((current) => ({ ...current, receipts: error.message }));
+                setLoading((current) => ({ ...current, receipts: false }));
+            },
+        );
+
         return () => {
             unsubscribeEmailData();
             unsubscribeUserDetails();
             unsubscribeManagers();
+            unsubscribeManagerActivations();
         };
     }, []);
 
     const users = useMemo(() => buildUsers(emailDocs, detailDocs), [emailDocs, detailDocs]);
-    const managers = useMemo(() => buildManagers(managerDocs, users), [managerDocs, users]);
+    const managerActivations = useMemo(
+        () => buildManagerActivations(managerActivationDocs, users),
+        [managerActivationDocs, users],
+    );
+    const managers = useMemo(
+        () => buildManagers(managerDocs, users, managerActivations),
+        [managerDocs, users, managerActivations],
+    );
     const stats = useMemo(() => buildStats(users), [users]);
     const selectedUser = useMemo(
         () => users.find((user) => user.id === selectedUserId) || null,
         [selectedUserId, users],
     );
-    const isLoading = loading.email || loading.details || loading.managers;
+    const isLoading = loading.email || loading.details || loading.managers || loading.receipts;
     const visibleErrors = Object.values(errors).filter(Boolean);
 
     const handleLogout = () => {
         signOut(auth);
+    };
+
+    const handleMarkReceived = async (activation) => {
+        const actor = {
+            name: auth.currentUser?.displayName || '',
+            email: auth.currentUser?.email || '',
+            uid: auth.currentUser?.uid || '',
+        };
+
+        setErrors((current) => ({ ...current, receipts: '' }));
+        setBusyActivationId(activation.id);
+
+        try {
+            await markManagerActivationReceived(activation, managerActivations, actor);
+        } catch (error) {
+            console.error('Failed to mark manager activation as received:', error);
+            setErrors((current) => ({ ...current, receipts: error.message || 'Failed to update the receipt status.' }));
+        } finally {
+            setBusyActivationId('');
+        }
     };
 
     return (
@@ -121,11 +168,29 @@ export default function Dashboard() {
                     />
                 )}
 
+                {activeTab === 'receipts' && (
+                    <ManagerReceiptsScreen
+                        activations={managerActivations}
+                        isLoading={loading.receipts}
+                        busyActivationId={busyActivationId}
+                        onMarkReceived={handleMarkReceived}
+                        onOpenUser={(user) => setSelectedUserId(user.id)}
+                    />
+                )}
+
                 {activeTab === 'managers' && (
                     <ManagersScreen
                         managers={managers}
                         isLoading={isLoading}
                         onOpenUser={(user) => setSelectedUserId(user.id)}
+                    />
+                )}
+
+                {activeTab === 'balances' && (
+                    <BalancesScreen
+                        managers={managers}
+                        isLoading={isLoading}
+                        onOpenManager={() => setActiveTab('managers')}
                     />
                 )}
             </main>

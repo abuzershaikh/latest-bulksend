@@ -11,6 +11,10 @@ Cloudflare Worker for affiliate/referral endpoints used by Android app:
 - `GET /api/referrals/clicks`
 - `GET /api/referrals/installs`
 - `GET /api/referrals/referred-users`
+- `GET /api/manager/access`
+- `GET /api/manager/search?q=...`
+- `GET /api/manager/customers`
+- `POST /api/manager/activate`
 - `GET /r/:code`
 
 ## Important
@@ -31,6 +35,15 @@ Optional:
 - `REFERRAL_PUBLIC_BASE_URL` (set to `https://refer-earn-worker.aawuazer.workers.dev`)
 - `REFERRAL_COMMISSION_RATE` (default `30`)
 - `ADMIN_API_KEY` (for header based admin auth flow)
+
+## Manager security flow
+
+The manager web panel authenticates with a Firebase ID token and then calls these worker endpoints.
+
+- `GET /api/manager/access` verifies Firebase auth and checks `affiliateManagers/{email}`
+- `GET /api/manager/search` returns only secure search matches, not the full user collection
+- `GET /api/manager/customers` returns only users attributed to that manager
+- `POST /api/manager/activate` writes premium plan fields plus manager attribution metadata
 
 ## Local/dev setup
 

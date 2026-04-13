@@ -4,10 +4,17 @@ export const tabs = [
     { id: 'dashboard', label: 'Dashboard' },
     { id: 'users', label: 'Users' },
     { id: 'activations', label: 'Activations' },
+    { id: 'receipts', label: 'Receipts' },
     { id: 'managers', label: 'Managers' },
+    { id: 'balances', label: 'Balances' },
 ];
 
 const numberFormatter = new Intl.NumberFormat('en-IN');
+const currencyFormatter = new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: 'INR',
+    maximumFractionDigits: 2,
+});
 const dateFormatter = new Intl.DateTimeFormat('en-IN', {
     day: '2-digit',
     month: 'short',
@@ -40,6 +47,16 @@ export function formatCount(value) {
     if (value === undefined || value === null || value === '') return '-';
     if (Number(value) >= 999999) return 'Unlimited';
     return numberFormatter.format(Number(value));
+}
+
+export function formatCurrency(value) {
+    const amount = Number(value);
+    if (!Number.isFinite(amount)) return currencyFormatter.format(0);
+    return currencyFormatter.format(amount);
+}
+
+export function formatCurrencyFromPaise(value) {
+    return formatCurrency((Number(value) || 0) / 100);
 }
 
 export function cleanText(value) {
@@ -75,6 +92,9 @@ function resolvePaymentMethod(data) {
     if (method.includes('razor')) return { id: 'razorpay', label: 'Razorpay' };
     if (method.includes('google') || method.includes('play')) {
         return { id: 'google_play', label: 'Google Play' };
+    }
+    if (method.includes('manager')) {
+        return { id: 'manager_panel', label: 'Manager Panel' };
     }
     if (method.includes('admin') || method.includes('manual')) {
         return { id: 'admin_panel', label: 'Admin Panel' };
@@ -192,6 +212,14 @@ function normalizeUser(key, record) {
         managerEmail: normalizeEmail(data.managerEmail),
         managerUid: cleanText(data.managerUid),
         managerActivatedMillis: toMillis(data.managerActivatedAt),
+        managerActivationEventId: cleanText(data.managerActivationEventId),
+        customerPaymentReceived: data.customerPaymentReceived === true,
+        customerPaymentReceivedMillis: toMillis(data.customerPaymentReceivedAt),
+        adminReceiptStatus: cleanText(data.adminReceiptStatus),
+        adminPaymentReceived: data.adminPaymentReceived === true,
+        adminPaymentReceivedMillis: toMillis(data.adminPaymentReceivedAt),
+        adminPaymentReceivedByName: cleanText(data.adminPaymentReceivedByName),
+        adminPaymentReceivedByEmail: cleanText(data.adminPaymentReceivedByEmail),
         sourceCollections: [
             record.emailData ? 'email_data' : '',
             record.detailData ? 'userDetails' : '',
@@ -199,8 +227,69 @@ function normalizeUser(key, record) {
     };
 }
 
-export function buildManagers(managerDocs, users) {
+export function buildManagerActivations(activationDocs, users) {
+    const usersByActivationId = new Map();
+    const usersById = new Map();
+    const usersByEmail = new Map();
+
+    users.forEach((user) => {
+        if (user.managerActivationEventId) {
+            usersByActivationId.set(user.managerActivationEventId, user);
+        }
+        if (user.userId) {
+            usersById.set(user.userId, user);
+        }
+        if (user.email) {
+            usersByEmail.set(normalizeEmail(user.email), user);
+        }
+    });
+
+    return activationDocs
+        .map(({ id, data }) => {
+            const matchedUser = usersByActivationId.get(id)
+                || usersById.get(cleanText(data.userId))
+                || usersByEmail.get(normalizeEmail(data.userEmail));
+            const adminPaymentReceived = data.adminPaymentReceived === true;
+            const rawPlan = cleanText(data.planType || matchedUser?.rawPlan);
+
+            return {
+                id,
+                managerName: cleanText(data.managerName) || matchedUser?.managerName || 'Manager',
+                managerEmail: normalizeEmail(data.managerEmail) || matchedUser?.managerEmail,
+                managerUid: cleanText(data.managerUid) || matchedUser?.managerUid,
+                userId: cleanText(data.userId) || matchedUser?.userId,
+                userName: cleanText(data.userName) || matchedUser?.name || 'Customer',
+                userEmail: normalizeEmail(data.userEmail) || normalizeEmail(matchedUser?.email),
+                emailDocId: cleanText(data.emailDocId) || matchedUser?.emailDocId || '',
+                detailDocId: cleanText(data.detailDocId) || matchedUser?.detailDocId || '',
+                rawPlan,
+                plan: cleanText(data.planLabel) || matchedUser?.plan || formatPlan(rawPlan),
+                paymentMethod: resolvePaymentMethod(data),
+                activationReference: cleanText(data.activationReference) || '',
+                activationMillis: toMillis(data.activatedAt || data.createdAt || matchedUser?.managerActivatedMillis || matchedUser?.activationMillis),
+                customerPaymentReceived: data.customerPaymentReceived === true || matchedUser?.customerPaymentReceived === true,
+                customerPaymentReceivedMillis: toMillis(data.customerPaymentReceivedAt || matchedUser?.customerPaymentReceivedMillis),
+                adminReceiptStatus: cleanText(data.adminReceiptStatus) || (adminPaymentReceived ? 'received' : 'pending'),
+                adminPaymentReceived,
+                adminPaymentReceivedMillis: toMillis(data.adminPaymentReceivedAt || matchedUser?.adminPaymentReceivedMillis),
+                adminPaymentReceivedByName: cleanText(data.adminPaymentReceivedByName) || matchedUser?.adminPaymentReceivedByName || '',
+                adminPaymentReceivedByEmail: cleanText(data.adminPaymentReceivedByEmail) || matchedUser?.adminPaymentReceivedByEmail || '',
+                planPricePaise: Number(data.planPricePaise) || 0,
+                user: matchedUser || null,
+            };
+        })
+        .sort((a, b) => {
+            if (a.adminPaymentReceived !== b.adminPaymentReceived) {
+                return a.adminPaymentReceived ? 1 : -1;
+            }
+
+            return (b.activationMillis || 0) - (a.activationMillis || 0);
+        });
+}
+
+export function buildManagers(managerDocs, users, managerActivations = []) {
     const customersByManager = new Map();
+    const activationsByManager = new Map();
 
     users.forEach((user) => {
         const managerEmail = normalizeEmail(user.managerEmail);
@@ -211,11 +300,23 @@ export function buildManagers(managerDocs, users) {
         customersByManager.set(managerEmail, current);
     });
 
+    managerActivations.forEach((activation) => {
+        const managerEmail = normalizeEmail(activation.managerEmail);
+        if (!managerEmail) return;
+
+        const current = activationsByManager.get(managerEmail) || [];
+        current.push(activation);
+        activationsByManager.set(managerEmail, current);
+    });
+
     return managerDocs
         .map(({ id, data }) => {
             const email = normalizeEmail(data.email || id);
             const customers = [...(customersByManager.get(email) || [])]
                 .sort((a, b) => (b.managerActivatedMillis || b.activationMillis || 0) - (a.managerActivatedMillis || a.activationMillis || 0));
+            const activations = [...(activationsByManager.get(email) || [])]
+                .sort((a, b) => (b.activationMillis || 0) - (a.activationMillis || 0));
+            const pendingActivations = activations.filter((activation) => !activation.adminPaymentReceived);
 
             return {
                 id,
@@ -225,11 +326,40 @@ export function buildManagers(managerDocs, users) {
                 createdMillis: toMillis(data.createdAt),
                 updatedMillis: toMillis(data.updatedAt),
                 lastLoginMillis: toMillis(data.lastLoginAt),
-                latestActivationMillis: customers[0]?.managerActivatedMillis || customers[0]?.activationMillis || null,
+                latestActivationMillis: activations[0]?.activationMillis || customers[0]?.managerActivatedMillis || customers[0]?.activationMillis || null,
                 totalCustomers: customers.length,
                 activeCustomers: customers.filter((user) => user.status === 'paid').length,
                 expiredCustomers: customers.filter((user) => user.status === 'expired').length,
                 freeCustomers: customers.filter((user) => user.status === 'free').length,
+                totalManagerActivations: activations.length || Math.max(0, Number(data.totalManagerActivations) || 0),
+                pendingAdminReceiptCount: pendingActivations.length || Math.max(0, Number(data.pendingAdminReceiptCount) || 0),
+                latestPendingActivationMillis: pendingActivations[0]?.activationMillis || toMillis(data.latestPendingActivationAt),
+                latestPendingActivationUserName: pendingActivations[0]?.userName || cleanText(data.latestPendingActivationUserName),
+                latestPendingActivationUserEmail: pendingActivations[0]?.userEmail || normalizeEmail(data.latestPendingActivationUserEmail),
+                latestPendingPlanLabel: pendingActivations[0]?.plan || cleanText(data.latestPendingPlanLabel),
+                referralCode: cleanText(data.affiliateReferralCode || data.myReferralCode || data.referralCode),
+                referralLink: cleanText(data.referralLink),
+                referralCount: Number(data.referralCount) || 0,
+                referralLinkClicks: Number(data.referralLinkClicks) || 0,
+                trackedInstalls: Number(data.trackedInstalls) || 0,
+                trackedRegistrations: Number(data.trackedRegistrations) || 0,
+                successfulReferrals: Number(data.successfulReferrals) || 0,
+                totalReferralEarnings: Number(data.totalReferralEarnings) || 0,
+                pendingEarnings: Number(data.pendingEarnings) || 0,
+                withdrawnEarnings: Number(data.withdrawnEarnings) || 0,
+                affiliateUpdatedMillis: toMillis(data.affiliateUpdatedAt),
+                walletCurrency: cleanText(data.walletCurrency) || 'INR',
+                walletBalancePaise: Number(data.walletBalancePaise) || 0,
+                walletBalance: (Number(data.walletBalancePaise) || 0) / 100,
+                walletTotalTopupPaise: Number(data.walletTotalTopupPaise) || 0,
+                walletTotalTopup: (Number(data.walletTotalTopupPaise) || 0) / 100,
+                walletTotalSpentPaise: Number(data.walletTotalSpentPaise) || 0,
+                walletTotalSpent: (Number(data.walletTotalSpentPaise) || 0) / 100,
+                walletLastTopupMillis: toMillis(data.walletLastTopupAt),
+                walletLastTopupAmountPaise: Number(data.walletLastTopupAmountPaise) || 0,
+                walletLastDebitMillis: toMillis(data.walletLastDebitAt),
+                walletLastDebitAmountPaise: Number(data.walletLastDebitAmountPaise) || 0,
+                walletUpdatedMillis: toMillis(data.walletUpdatedAt),
                 createdByName: cleanText(data.createdByName),
                 createdByEmail: cleanText(data.createdByEmail),
                 updatedByName: cleanText(data.updatedByName),
@@ -276,6 +406,7 @@ export function statusBadgeClass(status) {
 export function methodBadgeClass(methodId) {
     if (methodId === 'razorpay') return 'bg-orange-500/15 text-orange-100 border-orange-400/40';
     if (methodId === 'google_play') return 'bg-emerald-500/15 text-emerald-100 border-emerald-400/40';
+    if (methodId === 'manager_panel') return 'bg-cyan-500/15 text-cyan-100 border-cyan-400/40';
     if (methodId === 'admin_panel') return 'bg-sky-500/15 text-sky-100 border-sky-400/40';
     return 'bg-slate-500/15 text-slate-200 border-slate-400/30';
 }

@@ -38,8 +38,6 @@ import com.google.firebase.firestore.SetOptions
 import com.message.bulksend.MainActivity
 import com.message.bulksend.info.CountryInfo
 import com.message.bulksend.info.SimCountryDetector
-import com.message.bulksend.referral.InstallReferrerHelper
-import com.message.bulksend.referral.ReferralManager
 import com.message.bulksend.ui.theme.BulksendTestTheme
 import kotlinx.coroutines.launch
 
@@ -61,24 +59,18 @@ class UserDetailsActivity : ComponentActivity() {
 fun UserDetailsScreen() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val referralManager = remember { ReferralManager(context) }
     
     // Form state
     var fullName by remember { mutableStateOf("") }
     var email by remember { mutableStateOf("") }
     var phoneNumber by remember { mutableStateOf("") }
     var businessName by remember { mutableStateOf("") }
-    var referralCode by remember { mutableStateOf("") }
     var selectedCountry by remember { mutableStateOf<CountryInfo?>(null) }
     var showCountryDialog by remember { mutableStateOf(false) }
     var isLoading by remember { mutableStateOf(false) }
     
     // Country detection
     val simDetector = remember { SimCountryDetector(context) }
-    
-    // Install referrer helper to get pending referral code
-    val installReferrerHelper = remember { InstallReferrerHelper(context) }
-    val installTrackingId = remember { installReferrerHelper.getOrCreateInstallTrackingId() }
     
     // Auto-detect country and get user email on first load
     LaunchedEffect(Unit) {
@@ -97,47 +89,6 @@ fun UserDetailsScreen() {
             fullName = currentUser.displayName ?: ""
         }
         
-        // Check for pending referral code from Play Store install
-        val pendingCode = installReferrerHelper.getPendingReferralCode()
-        var affiliateInstallSource: String? = null
-        android.util.Log.d("UserDetails", "=== REFERRAL AUTO-FILL DEBUG ===")
-        android.util.Log.d("UserDetails", "Pending referral code from InstallReferrer: $pendingCode")
-        
-        if (!pendingCode.isNullOrBlank() && referralCode.isBlank()) {
-            referralCode = pendingCode
-            affiliateInstallSource = "play_store_install"
-            android.util.Log.d("UserDetails", "✅ Auto-filled referral code from install: $pendingCode")
-        }
-        
-        // Also check intent for deep link referral (for testing without Play Store)
-        val activity = context as? ComponentActivity
-        val intentReferral = activity?.intent?.getStringExtra("referral_code")
-        android.util.Log.d("UserDetails", "Intent referral code: $intentReferral")
-        android.util.Log.d("UserDetails", "Activity intent extras: ${activity?.intent?.extras}")
-        
-        if (!intentReferral.isNullOrBlank() && referralCode.isBlank()) {
-            referralCode = intentReferral.uppercase()
-            affiliateInstallSource = "deep_link"
-            android.util.Log.d("UserDetails", "✅ Auto-filled referral code from intent: $intentReferral")
-        }
-        
-        android.util.Log.d("UserDetails", "Final referral code value: $referralCode")
-
-        if (!referralCode.isNullOrBlank() && affiliateInstallSource != null) {
-            try {
-                val installResult = referralManager.trackAffiliateInstall(
-                    referralCode = referralCode,
-                    source = affiliateInstallSource,
-                    installId = installTrackingId
-                )
-                android.util.Log.d(
-                    "UserDetails",
-                    "Affiliate install tracking: success=${installResult.success}, message=${installResult.message}"
-                )
-            } catch (e: Exception) {
-                android.util.Log.e("UserDetails", "Error tracking affiliate install: ${e.message}", e)
-            }
-        }
     }
     
     val backgroundBrush = Brush.verticalGradient(
@@ -294,31 +245,6 @@ fun UserDetailsScreen() {
                         )
                     )
                     
-                    // Affiliate Code Field (Optional)
-                    OutlinedTextField(
-                        value = referralCode,
-                        onValueChange = { referralCode = it },
-                        label = { Text("Affiliate Code (Optional)") },
-                        leadingIcon = {
-                            Icon(Icons.Default.CardGiftcard, contentDescription = null)
-                        },
-                        placeholder = { Text("Paste creator or affiliate code if you have one") },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = Color(0xFF667eea),
-                            focusedLabelColor = Color(0xFF667eea),
-                            focusedTextColor = Color.Black,
-                            unfocusedTextColor = Color.Black
-                        )
-                    )
-
-                    Text(
-                        text = "Installed from a creator, YouTube or social media link? Your affiliate code is auto-detected from Play Store when available.",
-                        fontSize = 12.sp,
-                        color = Color(0xFF6C757D)
-                    )
-                    
                     Spacer(modifier = Modifier.height(16.dp))
                     
                     // Submit Button
@@ -338,19 +264,6 @@ fun UserDetailsScreen() {
                                     val countryCodeValue = selectedCountry?.countryCode ?: "91"
                                     val countryIsoValue = selectedCountry?.iso ?: "IN"
                                     val countryValue = selectedCountry?.country ?: "India"
-                                    
-                                    // Log referral code for debugging
-                                    android.util.Log.d("UserDetails", "=== REFERRAL CODE DEBUG ===")
-                                    android.util.Log.d("UserDetails", "Entered referral code: '$referralCode'")
-                                    
-                                    // Properly handle referral code - trim and uppercase
-                                    val finalReferralCode = if (referralCode.trim().isNotBlank()) {
-                                        referralCode.trim().uppercase()
-                                    } else {
-                                        null
-                                    }
-                                    android.util.Log.d("UserDetails", "Final referral code to save: $finalReferralCode")
-                                    
                                     val userDetails = hashMapOf<String, Any?>(
                                         "userId" to userId,
                                         "fullName" to fullName,
@@ -360,7 +273,6 @@ fun UserDetailsScreen() {
                                         "countryCode" to countryCodeValue,
                                         "countryIso" to countryIsoValue,
                                         "country" to countryValue,
-                                        "referredBy" to finalReferralCode,
                                         "timestamp" to System.currentTimeMillis()
                                     )
                                     
@@ -388,9 +300,9 @@ fun UserDetailsScreen() {
                                                 countryCode = countryCodeValue,
                                                 countryIso = countryIsoValue,
                                                 country = countryValue,
-                                                referralCode = finalReferralCode
+                                                referralCode = null
                                             )
-                                            android.util.Log.d("UserDetails", "✅ Saved to UserDetailsPreferences with referralCode: $finalReferralCode")
+                                            android.util.Log.d("UserDetails", "User details saved in preferences")
                                             
                                             // Keep profile collection synced so Profile screen gets first-time name immediately.
                                             val authEmail = currentUser?.email ?: email
@@ -413,40 +325,6 @@ fun UserDetailsScreen() {
                                                         android.util.Log.e("UserDetails", "Failed syncing profile name to email_data", syncError)
                                                     }
                                             }
-
-                                            // Continue affiliate setup in background even after activity finishes
-                                            kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                                                try {
-                                                    val generateResult = referralManager.generateReferralCode(fullName)
-                                                    if (generateResult.success) {
-                                                        android.util.Log.d("UserDetails", "✅ Referral code generated: ${generateResult.referralCode}")
-                                                    } else {
-                                                        android.util.Log.e("UserDetails", "❌ Failed to generate referral code: ${generateResult.message}")
-                                                    }
-                                                } catch (e: Exception) {
-                                                    android.util.Log.e("UserDetails", "❌ Error generating referral code: ${e.message}")
-                                                }
-                                                
-                                                // 2. Process referral code if user entered one
-                                                if (!finalReferralCode.isNullOrBlank()) {
-                                                    try {
-                                                        val processResult = referralManager.processReferralCode(
-                                                            referralCode = finalReferralCode,
-                                                            installId = installTrackingId
-                                                        )
-                                                        if (processResult.success) {
-                                                            android.util.Log.d("UserDetails", "✅ Referral code processed: ${processResult.referrerName}")
-                                                            // Clear pending referral code after successful processing
-                                                            installReferrerHelper.clearPendingReferralCode()
-                                                        } else {
-                                                            android.util.Log.e("UserDetails", "❌ Failed to process referral: ${processResult.message}")
-                                                        }
-                                                    } catch (e: Exception) {
-                                                        android.util.Log.e("UserDetails", "❌ Error processing referral code: ${e.message}")
-                                                    }
-                                                }
-                                            }
-                                            
                                             Toast.makeText(context, "Details saved successfully!", Toast.LENGTH_SHORT).show()
                                             context.startActivity(Intent(context, MainActivity::class.java))
                                             (context as ComponentActivity).finish()

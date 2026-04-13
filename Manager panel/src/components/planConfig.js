@@ -9,18 +9,16 @@ export const PREMIUM_LIMITS = {
 };
 
 export const PLAN_OPTIONS = [
-    { id: 'monthly', label: 'Monthly', days: 30 },
-    { id: 'yearly', label: 'Yearly', days: 365 },
-    { id: 'lifetime', label: 'Lifetime', days: 36500 },
-    { id: 'aiagent499', label: 'AI Agent 499', days: 30 },
-    { id: 'ai_monthly', label: 'AI Monthly', days: 30 },
-    { id: 'ai_yearly', label: 'AI Yearly', days: 365 },
+    { id: 'monthly', label: 'Monthly', days: 30, pricePaise: 29900 },
+    { id: 'yearly', label: 'Yearly', days: 365, pricePaise: 149900 },
+    { id: 'lifetime', label: 'Lifetime', days: 36500, pricePaise: 299900 },
+    { id: 'aiagent499', label: 'AI Agent 499', days: 30, pricePaise: 49900 },
+    { id: 'ai_monthly', label: 'AI Monthly', days: 30, pricePaise: 19900 },
+    { id: 'ai_yearly', label: 'AI Yearly', days: 365, pricePaise: 89900 },
 ];
 
 export const PAYMENT_SOURCE_OPTIONS = [
-    { id: 'admin_panel', label: 'Admin Panel' },
-    { id: 'razorpay', label: 'Razorpay' },
-    { id: 'google_play', label: 'Google Play' },
+    { id: 'manager_panel', label: 'Manager Wallet' },
 ];
 
 const planLookup = Object.fromEntries(PLAN_OPTIONS.map((plan) => [plan.id, plan]));
@@ -36,6 +34,15 @@ export function getPlanDays(planType) {
 
 export function getPlanLabel(planType) {
     return planLookup[planType]?.label || planType;
+}
+
+export function getPlanPricePaise(planType) {
+    return planLookup[planType]?.pricePaise || 0;
+}
+
+export function getPlanActivationCostPaise(planType) {
+    const planPricePaise = getPlanPricePaise(planType);
+    return planPricePaise > 0 ? Math.round(planPricePaise / 2) : 0;
 }
 
 export function getPaymentSourceLabel(paymentMethod) {

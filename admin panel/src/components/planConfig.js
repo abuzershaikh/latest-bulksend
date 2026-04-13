@@ -19,6 +19,7 @@ export const PLAN_OPTIONS = [
 
 export const PAYMENT_SOURCE_OPTIONS = [
     { id: 'admin_panel', label: 'Admin Panel' },
+    { id: 'manager_panel', label: 'Manager Panel' },
     { id: 'razorpay', label: 'Razorpay' },
     { id: 'google_play', label: 'Google Play' },
 ];

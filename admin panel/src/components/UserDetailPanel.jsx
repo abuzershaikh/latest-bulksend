@@ -130,6 +130,16 @@ export default function UserDetailPanel({ user, onClose }) {
                         <DetailRow label="Razorpay payment ID" value={user.lastPaymentId || 'Not recorded'} />
                         <DetailRow label="Google order ID" value={user.lastOrderId || 'Not recorded'} />
                         <DetailRow label="Purchase token" value={shortToken(user.lastPurchaseToken) || 'Not recorded'} />
+                        <DetailRow
+                            label="Admin receipt"
+                            value={user.paymentMethod.id === 'manager_panel'
+                                ? user.adminPaymentReceived
+                                    ? `Received on ${formatDate(user.adminPaymentReceivedMillis, true)}`
+                                    : user.adminReceiptStatus === 'pending'
+                                        ? 'Pending receipt from admin'
+                                        : 'Not recorded'
+                                : 'Not applicable'}
+                        />
                     </DetailSection>
 
                     <DetailSection title="Usage">

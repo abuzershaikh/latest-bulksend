@@ -20,6 +20,7 @@ fun Project.readOptionalConfig(name: String): String {
 }
 
 val defaultChatsPromoWorkerUrl = "https://bulksender-ai-agent.aawuazer.workers.dev"
+val defaultVoiceWorkerUrl = "https://gemini-voice-cache-worker.aawuazer.workers.dev"
 
 android {
     signingConfigs {
@@ -56,6 +57,20 @@ android {
             "String",
             "CHATSPROMO_WORKER_CLIENT_TOKEN",
             "\"${escapedBuildConfigValue(project.readOptionalConfig("CHATSPROMO_WORKER_CLIENT_TOKEN"))}\""
+        )
+        val voiceWorkerUrl =
+            project.readOptionalConfig("VOICE_WORKER_URL")
+                .ifBlank { defaultVoiceWorkerUrl }
+
+        buildConfigField(
+            "String",
+            "VOICE_WORKER_URL",
+            "\"${escapedBuildConfigValue(voiceWorkerUrl)}\""
+        )
+        buildConfigField(
+            "String",
+            "VOICE_WORKER_CLIENT_TOKEN",
+            "\"${escapedBuildConfigValue(project.readOptionalConfig("VOICE_WORKER_CLIENT_TOKEN"))}\""
         )
     }
 
@@ -134,6 +149,7 @@ dependencies {
     implementation(libs.androidx.activity.ktx)
     implementation(libs.androidx.material.icons.extended)
     implementation(libs.coil.compose)
+    implementation("io.coil-kt:coil-svg:2.7.0")
 
     // Navigation Compose
     implementation("androidx.navigation:navigation-compose:2.7.7")

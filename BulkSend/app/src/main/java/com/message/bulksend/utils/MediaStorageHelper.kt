@@ -2,10 +2,11 @@ package com.message.bulksend.utils
 
 import android.content.Context
 import android.net.Uri
+import android.provider.OpenableColumns
 import android.util.Log
+import android.webkit.MimeTypeMap
 import java.io.File
 import java.io.FileOutputStream
-import java.io.InputStream
 
 /**
  * Helper class to manage media storage for campaigns
@@ -61,20 +62,54 @@ object MediaStorageHelper {
      * Get file extension from URI
      */
     private fun getFileExtension(context: Context, uri: Uri): String {
-        val mimeType = context.contentResolver.getType(uri)
+        val mimeType = context.contentResolver.getType(uri)?.lowercase().orEmpty()
+        val displayName = resolveDisplayName(context, uri)
+        val displayExtension = displayName.substringAfterLast('.', "").lowercase()
+
         return when {
-            mimeType?.contains("image/jpeg") == true -> "jpg"
-            mimeType?.contains("image/png") == true -> "png"
-            mimeType?.contains("image/gif") == true -> "gif"
-            mimeType?.contains("video/mp4") == true -> "mp4"
-            mimeType?.contains("video/3gpp") == true -> "3gp"
-            mimeType?.contains("video") == true -> "mp4"
-            mimeType?.contains("audio/mpeg") == true -> "mp3"
-            mimeType?.contains("audio") == true -> "mp3"
-            mimeType?.contains("application/pdf") == true -> "pdf"
-            mimeType?.contains("document") == true -> "doc"
+            displayExtension.isNotBlank() -> displayExtension
+            mimeType == "image/jpeg" -> "jpg"
+            mimeType == "image/png" -> "png"
+            mimeType == "image/gif" -> "gif"
+            mimeType == "image/webp" -> "webp"
+            mimeType == "video/mp4" -> "mp4"
+            mimeType == "video/3gpp" -> "3gp"
+            mimeType.startsWith("video/") ->
+                MimeTypeMap.getSingleton().getExtensionFromMimeType(mimeType) ?: "mp4"
+            mimeType == "audio/mpeg" -> "mp3"
+            mimeType.startsWith("audio/") ->
+                MimeTypeMap.getSingleton().getExtensionFromMimeType(mimeType) ?: "mp3"
+            mimeType == "application/pdf" -> "pdf"
+            mimeType == "application/msword" -> "doc"
+            mimeType == "application/vnd.openxmlformats-officedocument.wordprocessingml.document" -> "docx"
+            mimeType == "application/vnd.ms-excel" -> "xls"
+            mimeType == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" -> "xlsx"
+            mimeType == "application/vnd.ms-powerpoint" -> "ppt"
+            mimeType == "application/vnd.openxmlformats-officedocument.presentationml.presentation" -> "pptx"
+            mimeType == "text/plain" -> "txt"
+            mimeType.isNotBlank() ->
+                MimeTypeMap.getSingleton().getExtensionFromMimeType(mimeType) ?: "media"
             else -> "media"
         }
+    }
+
+    private fun resolveDisplayName(context: Context, uri: Uri): String {
+        if (uri.scheme == "content") {
+            context.contentResolver.query(
+                uri,
+                arrayOf(OpenableColumns.DISPLAY_NAME),
+                null,
+                null,
+                null
+            )?.use { cursor ->
+                val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (index >= 0 && cursor.moveToFirst()) {
+                    return cursor.getString(index).orEmpty()
+                }
+            }
+        }
+
+        return uri.lastPathSegment.orEmpty()
     }
     
     /**

@@ -51,6 +51,7 @@ import com.message.bulksend.support.CustomerChatSupportActivity
 import com.message.bulksend.support.WelcomeMessageManager
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -59,11 +60,15 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.airbnb.lottie.compose.*
+import coil.compose.AsyncImage
+import coil.decode.SvgDecoder
+import coil.request.ImageRequest
 import com.message.bulksend.anylatic.ReportlistActivity
 import com.message.bulksend.bulksend.BulksendActivity
 
 import com.message.bulksend.bulksend.BulkMessage1Activity
 import com.message.bulksend.bulksend.CampaignStatusActivity
+import com.message.bulksend.bulksend.FloatingChatbotLauncher
 import com.message.bulksend.bulksend.SelectActivity
 import com.message.bulksend.contactmanager.ContactzActivity
 import com.message.bulksend.support.SupportActivity
@@ -763,6 +768,21 @@ fun MainScreen() {
                 HomeContent(innerPadding, backgroundBrush, context) { showExtractPermissionDialog = true }
             }
         )
+
+        FloatingChatbotLauncher(
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .windowInsetsPadding(WindowInsets.navigationBars)
+                .padding(end = 18.dp, bottom = 92.dp),
+            onClick = {
+                context.startActivity(
+                    Intent(
+                        context,
+                        com.message.bulksend.bulksenderaiagent.BulksenderAiAgentActivity::class.java
+                    )
+                )
+            }
+        )
     }
 
     // Extract Permission Dialog
@@ -791,7 +811,7 @@ fun HomeContent(
             .padding(innerPadding)
             .fillMaxSize()
             .background(backgroundBrush),
-        contentPadding = PaddingValues(16.dp),
+        contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 136.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         // Hero Card - Send Message
@@ -866,6 +886,14 @@ fun HomeContent(
                 }
             )
         }
+
+        item {
+            ResellerHomeBannerCard(
+                onClick = {
+                    context.startActivity(Intent(context, com.message.bulksend.referral.ResellerProgramActivity::class.java))
+                }
+            )
+        }
         
         // Section Divider
         item { 
@@ -908,10 +936,10 @@ fun HomeContent(
                 items = listOf(
                     SupportItem(
                         icon = Icons.Outlined.CardGiftcard,
-                        title = "ChatsPromo Affiliate",
-                        subtitle = "Track installs, signups and plan sales",
+                        title = "Join Reseller Program",
+                        subtitle = "Resell BulkSend and ChatsPromo. Earn 60% on the spot.",
                         onClick = {
-                            context.startActivity(Intent(context, com.message.bulksend.referral.ReferralActivity::class.java))
+                            context.startActivity(Intent(context, com.message.bulksend.referral.ResellerProgramActivity::class.java))
                         }
                     ),
                     SupportItem(
@@ -1877,6 +1905,106 @@ fun StatusSchedulerCard(onClick: () -> Unit) {
                             modifier = Modifier.size(16.dp)
                         )
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ResellerHomeBannerCard(onClick: () -> Unit) {
+    val context = LocalContext.current
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.Transparent)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(
+                    width = 1.dp,
+                    brush = Brush.horizontalGradient(
+                        colors = listOf(
+                            Color(0xFF60A5FA).copy(alpha = 0.55f),
+                            Color(0xFF22C55E).copy(alpha = 0.45f),
+                            Color(0xFF38BDF8).copy(alpha = 0.55f)
+                        )
+                    ),
+                    shape = RoundedCornerShape(24.dp)
+                )
+                .background(
+                    brush = Brush.verticalGradient(
+                        colors = listOf(
+                            Color(0xFF08131F).copy(alpha = 0.98f),
+                            Color(0xFF0C1D2F).copy(alpha = 0.98f),
+                            Color(0xFF10324A).copy(alpha = 0.96f)
+                        )
+                    ),
+                    shape = RoundedCornerShape(24.dp)
+                )
+                .padding(16.dp)
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "Reseller Program",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp,
+                            color = Color.White
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "Open reseller page for desktop and Android BulkSender app offers.",
+                            fontSize = 13.sp,
+                            color = Color(0xFFBFDBFE),
+                            lineHeight = 18.sp
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .size(42.dp)
+                            .clip(CircleShape)
+                            .background(Color.White.copy(alpha = 0.10f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowForwardIos,
+                            contentDescription = "Open reseller program",
+                            tint = Color.White,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = Color.White.copy(alpha = 0.95f),
+                    shape = RoundedCornerShape(20.dp),
+                    shadowElevation = 10.dp,
+                    tonalElevation = 4.dp
+                ) {
+                    AsyncImage(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .aspectRatio(16f / 9f)
+                            .clip(RoundedCornerShape(20.dp)),
+                        model = ImageRequest.Builder(context)
+                            .data("file:///android_asset/reseller.svg")
+                            .decoderFactory(SvgDecoder.Factory())
+                            .crossfade(true)
+                            .build(),
+                        contentDescription = "Reseller banner",
+                        contentScale = ContentScale.Fit
+                    )
                 }
             }
         }

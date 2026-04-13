@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { auth } from '../firebase';
 import { EmptyState, ScreenTitle, StatCard } from './AdminUi';
-import { formatDate } from './adminData';
+import { formatCurrencyFromPaise, formatDate } from './adminData';
 import ManagerDetailPanel from './ManagerDetailPanel';
 import { saveManagerAccount, setManagerAccess } from './managerAccess';
 
@@ -167,10 +167,10 @@ export default function ManagersScreen({ managers, isLoading, onOpenUser }) {
                                         </div>
                                         <p className="mt-1 truncate text-sm text-slate-400">{manager.email}</p>
                                         <p className="mt-2 text-sm text-slate-300">
-                                            {manager.totalCustomers} customers | Last activation {formatDate(manager.latestActivationMillis, true)}
+                                            {manager.totalCustomers} activated customers | {manager.trackedInstalls} affiliate installs | Last activation {formatDate(manager.latestActivationMillis, true)}
                                         </p>
                                         <p className="mt-1 text-xs text-slate-500">
-                                            Last login {formatDate(manager.lastLoginMillis, true)}
+                                            Last login {formatDate(manager.lastLoginMillis, true)} | Pending dues {manager.pendingAdminReceiptCount || 0} | Code {manager.referralCode || 'Pending'} | Balance {formatCurrencyFromPaise(manager.walletBalancePaise)}
                                         </p>
                                     </div>
 

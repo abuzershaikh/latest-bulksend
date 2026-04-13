@@ -40,6 +40,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.message.bulksend.components.CountryCodeSelector
@@ -443,6 +444,8 @@ fun AutonomousBulkSendScreen() {
     var selectedGroup by remember { mutableStateOf<Group?>(null) }
     var selectedCountry by remember { mutableStateOf(CountryCodeManager.getOrAutoDetectCountry(context)) }
     var message by remember { mutableStateOf("") }
+    var mediaUri by remember { mutableStateOf<Uri?>(null) }
+    var localMediaPath by remember { mutableStateOf<String?>(null) }
     var selectedDaysSlider by remember { mutableFloatStateOf(3f) }
     var showGroupSheet by remember { mutableStateOf(false) }
     var whatsAppPreference by remember { mutableStateOf("WhatsApp") }
@@ -459,7 +462,6 @@ fun AutonomousBulkSendScreen() {
     var showAccessibilityDialog by remember { mutableStateOf(false) }
     var showRiskDialog by remember { mutableStateOf(false) }
     var riskOverrideAccepted by remember { mutableStateOf(false) }
-    var isWhatsAppSelectorExpanded by remember { mutableStateOf(false) }
     var showAlarmPermissionDialog by remember { mutableStateOf(false) }
     var hasProgressRedirected by remember { mutableStateOf(false) }
     val selectedDays = selectedDaysSlider.roundToInt().coerceIn(1, 30)
@@ -467,6 +469,49 @@ fun AutonomousBulkSendScreen() {
     val contactzLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { /* group list updates via Flow */ }
+
+    val savePickedMedia: (Uri) -> Unit = remember(context, currentCampaignId) {
+        { pickedUri ->
+            try {
+                val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION
+                context.contentResolver.takePersistableUriPermission(pickedUri, flags)
+            } catch (_: SecurityException) {
+            }
+
+            mediaUri = pickedUri
+            scope.launch(Dispatchers.IO) {
+                val tempCampaignId = currentCampaignId ?: UUID.randomUUID().toString()
+                val savedPath = com.message.bulksend.utils.MediaStorageHelper.saveMediaToLocal(
+                    context,
+                    pickedUri,
+                    tempCampaignId
+                )
+                withContext(Dispatchers.Main) {
+                    if (savedPath != null) {
+                        localMediaPath = savedPath
+                    } else {
+                        Toast.makeText(context, "Failed to save selected file.", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        }
+    }
+
+    val imagePickerLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        uri?.let(savePickedMedia)
+    }
+    val videoPickerLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        uri?.let(savePickedMedia)
+    }
+    val documentPickerLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        uri?.let(savePickedMedia)
+    }
 
     val scheduleResult = remember(selectedGroup, selectedDays) {
         calculateAdaptiveAiSchedule(
@@ -630,59 +675,47 @@ fun AutonomousBulkSendScreen() {
                 },
                 actions = {
                     // Compact WhatsApp selector — shows short label to avoid title overflow
-                    val waOptions = listOf("WhatsApp Business", "WhatsApp")
-                    val waShortLabel = if (whatsAppPreference == "WhatsApp Business") "WA Biz" else "WA"
-                    Box(modifier = Modifier.padding(end = 4.dp)) {
-                        androidx.compose.material3.ExposedDropdownMenuBox(
-                            expanded = isWhatsAppSelectorExpanded,
-                            onExpandedChange = { isWhatsAppSelectorExpanded = it }
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .menuAnchor()
-                                    .clickable { isWhatsAppSelectorExpanded = !isWhatsAppSelectorExpanded }
-                                    .background(Color(0xFF00E5FF).copy(alpha = 0.1f), RoundedCornerShape(50))
-                                    .padding(horizontal = 10.dp, vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(2.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.Chat,
-                                    contentDescription = null,
-                                    tint = Color(0xFF00E5FF),
-                                    modifier = Modifier.size(15.dp)
-                                )
-                                Text(
-                                    text = waShortLabel,
-                                    color = Color(0xFF00E5FF),
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                                Icon(
-                                    imageVector = if (isWhatsAppSelectorExpanded) Icons.Default.ArrowDropUp else Icons.Default.ArrowDropDown,
-                                    contentDescription = null,
-                                    tint = Color(0xFF00E5FF),
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            }
-                            DropdownMenu(
-                                expanded = isWhatsAppSelectorExpanded,
-                                onDismissRequest = { isWhatsAppSelectorExpanded = false },
-                                modifier = Modifier.background(Color(0xFF0D0D1A))
-                            ) {
-                                waOptions.forEach { option ->
-                                    DropdownMenuItem(
-                                        text = { Text(option, color = Color(0xFFE0E8FF)) },
-                                        onClick = {
-                                            whatsAppPreference = option
-                                            isWhatsAppSelectorExpanded = false
-                                            scope.launch(Dispatchers.IO) {
-                                                settingDao.upsertSetting(Setting("whatsapp_preference", option))
-                                            }
-                                        }
-                                    )
+                    Row(
+                        modifier = Modifier.padding(end = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                whatsAppPreference = "WhatsApp"
+                                scope.launch(Dispatchers.IO) {
+                                    settingDao.upsertSetting(Setting("whatsapp_preference", "WhatsApp"))
                                 }
-                            }
+                            },
+                            shape = RoundedCornerShape(topStartPercent = 50, bottomStartPercent = 50),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                containerColor = if (whatsAppPreference == "WhatsApp") Color(0xFF00E5FF) else Color.Transparent,
+                                contentColor = if (whatsAppPreference == "WhatsApp") Color(0xFF041018) else Color(0xFF00E5FF)
+                            ),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF00E5FF)),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                            modifier = Modifier.height(32.dp)
+                        ) {
+                            Text("WhatsApp", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                whatsAppPreference = "WhatsApp Business"
+                                scope.launch(Dispatchers.IO) {
+                                    settingDao.upsertSetting(Setting("whatsapp_preference", "WhatsApp Business"))
+                                }
+                            },
+                            shape = RoundedCornerShape(topEndPercent = 50, bottomEndPercent = 50),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                containerColor = if (whatsAppPreference == "WhatsApp Business") Color(0xFF00E5FF) else Color.Transparent,
+                                contentColor = if (whatsAppPreference == "WhatsApp Business") Color(0xFF041018) else Color(0xFF00E5FF)
+                            ),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF00E5FF)),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                            modifier = Modifier
+                                .height(32.dp)
+                                .offset(x = (-1).dp)
+                        ) {
+                            Text("Business", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                         }
                     }
                 },
@@ -777,7 +810,7 @@ fun AutonomousBulkSendScreen() {
                 item {
                     AiStepCard(
                         stepNumber = 2,
-                        title = "Write Your Message",
+                        title = "Message & Attachment",
                         icon = Icons.Outlined.Message,
                         isCompleted = message.isNotBlank(),
                         accentColor = Color(0xFF7C4DFF)
@@ -804,6 +837,34 @@ fun AutonomousBulkSendScreen() {
                                     cursorColor = Color(0xFF7C4DFF)
                                 ),
                                 shape = RoundedCornerShape(12.dp)
+                            )
+                            AutonomousAttachmentCard(
+                                fileName =
+                                    when {
+                                        !localMediaPath.isNullOrBlank() -> java.io.File(localMediaPath!!).name
+                                        mediaUri != null -> mediaUri?.lastPathSegment ?: "Attached file"
+                                        else -> null
+                                    },
+                                onPickImage = { imagePickerLauncher.launch(arrayOf("image/*")) },
+                                onPickVideo = { videoPickerLauncher.launch(arrayOf("video/*")) },
+                                onPickDocument = {
+                                    documentPickerLauncher.launch(
+                                        arrayOf(
+                                            "application/pdf",
+                                            "application/msword",
+                                            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                            "application/vnd.ms-excel",
+                                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                            "application/vnd.ms-powerpoint",
+                                            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                                            "text/plain"
+                                        )
+                                    )
+                                },
+                                onRemove = {
+                                    mediaUri = null
+                                    localMediaPath = null
+                                }
                             )
                             /* Unique message toggle removed
                             Row(
@@ -1017,15 +1078,43 @@ fun AutonomousBulkSendScreen() {
 
                                     val campaignToRun =
                                         if (resumableCampaign != null) {
+                                            val finalMediaPath =
+                                                if (!localMediaPath.isNullOrBlank()) {
+                                                    localMediaPath
+                                                } else {
+                                                    resumableCampaign.mediaPath
+                                                }
+
                                             resumableCampaign.copy(
                                                 message = message,
                                                 isStopped = false,
                                                 isRunning = true,
-                                                countryCode = country.dial_code
+                                                countryCode = country.dial_code,
+                                                mediaPath = finalMediaPath
                                             )
                                         } else {
+                                            val newCampaignId = UUID.randomUUID().toString()
+                                            val finalMediaPath =
+                                                if (!localMediaPath.isNullOrBlank()) {
+                                                    localMediaPath
+                                                } else if (mediaUri != null) {
+                                                    withContext(Dispatchers.IO) {
+                                                        com.message.bulksend.utils.MediaStorageHelper.saveMediaToLocal(
+                                                            context,
+                                                            mediaUri!!,
+                                                            newCampaignId
+                                                        )
+                                                    }
+                                                } else {
+                                                    null
+                                                }
+
+                                            if (!finalMediaPath.isNullOrBlank()) {
+                                                localMediaPath = finalMediaPath
+                                            }
+
                                             Campaign(
-                                                id = UUID.randomUUID().toString(),
+                                                id = newCampaignId,
                                                 groupId = group.id.toString(),
                                                 campaignName = "Autonomous_${group.name}",
                                                 message = message,
@@ -1038,7 +1127,8 @@ fun AutonomousBulkSendScreen() {
                                                 isStopped = false,
                                                 isRunning = true,
                                                 campaignType = "BULKTEXT_AUTONOMOUS",
-                                                countryCode = country.dial_code
+                                                countryCode = country.dial_code,
+                                                mediaPath = finalMediaPath
                                             )
                                         }
 
@@ -1091,7 +1181,8 @@ fun AutonomousBulkSendScreen() {
                                         campaignId = campaignToRun.id,
                                         config = AutonomousCampaignRuntimeConfig(
                                             countryCode = country.dial_code,
-                                            whatsAppPreference = whatsAppPreference
+                                            whatsAppPreference = whatsAppPreference,
+                                            hasMediaAttachment = !campaignToRun.mediaPath.isNullOrBlank()
                                         )
                                     )
                                     AutonomousCampaignConfigStore.setActiveCampaignId(
@@ -1630,6 +1721,104 @@ fun AiLaunchButton(enabled: Boolean, isRunning: Boolean, onClick: () -> Unit) {
                 color = if (enabled) Color.White else Color.White.copy(alpha = 0.3f)
             )
         }
+    }
+}
+
+@Composable
+private fun AutonomousAttachmentCard(
+    fileName: String?,
+    onPickImage: () -> Unit,
+    onPickVideo: () -> Unit,
+    onPickDocument: () -> Unit,
+    onRemove: () -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(Color(0xFF15152A))
+                .border(1.dp, Color(0xFF2A2A4A), RoundedCornerShape(12.dp))
+                .padding(12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(
+                    "Optional media attachment",
+                    color = Color.White,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    fileName ?: "Image, video, ya document attach karke text ke sath bhej sakte ho.",
+                    color = Color.White.copy(alpha = if (fileName == null) 0.55f else 0.78f),
+                    fontSize = 12.sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            if (fileName != null) {
+                IconButton(onClick = onRemove) {
+                    Icon(
+                        Icons.Filled.Close,
+                        contentDescription = "Remove attachment",
+                        tint = Color(0xFFFF8A80)
+                    )
+                }
+            }
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            AttachmentOptionChip(
+                modifier = Modifier.weight(1f),
+                icon = Icons.Outlined.Image,
+                label = "Image",
+                tint = Color(0xFF00E5FF),
+                onClick = onPickImage
+            )
+            AttachmentOptionChip(
+                modifier = Modifier.weight(1f),
+                icon = Icons.Outlined.VideoFile,
+                label = "Video",
+                tint = Color(0xFFFFB74D),
+                onClick = onPickVideo
+            )
+            AttachmentOptionChip(
+                modifier = Modifier.weight(1f),
+                icon = Icons.Outlined.Description,
+                label = "Document",
+                tint = Color(0xFF81C784),
+                onClick = onPickDocument
+            )
+        }
+    }
+}
+
+@Composable
+private fun AttachmentOptionChip(
+    modifier: Modifier = Modifier,
+    icon: ImageVector,
+    label: String,
+    tint: Color,
+    onClick: () -> Unit
+) {
+    OutlinedButton(
+        onClick = onClick,
+        modifier = modifier.height(48.dp),
+        shape = RoundedCornerShape(12.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, tint.copy(alpha = 0.4f)),
+        colors = ButtonDefaults.outlinedButtonColors(contentColor = tint)
+    ) {
+        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(16.dp))
+        Spacer(Modifier.width(6.dp))
+        Text(label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
     }
 }
 

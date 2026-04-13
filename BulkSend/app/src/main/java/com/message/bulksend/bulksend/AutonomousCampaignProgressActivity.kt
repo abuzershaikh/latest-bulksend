@@ -304,6 +304,7 @@ private fun AutonomousCampaignHeroCard(state: AutonomousCampaignProgressState) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(
+                    modifier = Modifier.weight(1f),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -325,7 +326,9 @@ private fun AutonomousCampaignHeroCard(state: AutonomousCampaignProgressState) {
                             text = state.campaign.campaignName.removePrefix("Autonomous_"),
                             color = Color.White,
                             fontWeight = FontWeight.ExtraBold,
-                            fontSize = 18.sp
+                            fontSize = 18.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                         Text(
                             text = tone.description,
@@ -334,15 +337,22 @@ private fun AutonomousCampaignHeroCard(state: AutonomousCampaignProgressState) {
                         )
                     }
                 }
-                Text(
-                    text = tone.label,
-                    color = tone.color,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 12.sp,
-                    modifier = Modifier
-                        .background(tone.color.copy(alpha = 0.12f), RoundedCornerShape(999.dp))
-                        .padding(horizontal = 12.dp, vertical = 7.dp)
-                )
+                Spacer(modifier = Modifier.size(10.dp))
+                Surface(
+                    color = tone.color.copy(alpha = 0.12f),
+                    shape = RoundedCornerShape(999.dp)
+                ) {
+                    Text(
+                        text = tone.label,
+                        color = tone.color,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Clip,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
+                    )
+                }
             }
 
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {

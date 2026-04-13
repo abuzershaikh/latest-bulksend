@@ -137,7 +137,8 @@
         <activity
             android:name=".bulksenderaiagent.BulksenderAiAgentActivity"
             android:exported="false"
-            android:label="AI Campaign Guide" />
+            android:label="AI Campaign Guide"
+            android:windowSoftInputMode="adjustResize" />
 
         <activity
 
@@ -766,14 +767,9 @@
             android:label="User Details" />
 
         <activity
-            android:name=".referral.ReferralActivity"
+            android:name=".referral.ResellerProgramActivity"
             android:exported="false"
-            android:label="ChatsPromo Affiliate" />
-
-        <activity
-            android:name=".referral.AffiliateFunnelActivity"
-            android:exported="false"
-            android:label="Affiliate Funnel" />
+            android:label="Reseller Program" />
 
         <activity
             android:name=".whatsappselect.WhatsAppSelectActivity"

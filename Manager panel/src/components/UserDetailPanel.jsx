@@ -1,72 +1,103 @@
 import { useMemo, useState } from 'react';
-import { formatCount, formatDate, methodBadgeClass, shortToken, statusBadgeClass, statusLabel } from './adminData';
+import {
+    formatCount,
+    formatDate,
+    methodBadgeClass,
+    shortToken,
+    statusBadgeClass,
+    statusLabel,
+} from './adminData';
 import { Badge } from './AdminUi';
-import { activateUserPlan, deactivateUserPlan } from './planActions';
-import { PAYMENT_SOURCE_OPTIONS, PLAN_OPTIONS, getPlanEndMillis, getPlanLabel, isKnownPlan } from './planConfig';
+import { activateUserPlan } from './planActions';
+import {
+    PLAN_OPTIONS,
+    getPlanEndMillis,
+    getPlanLabel,
+    isKnownPlan,
+} from './planConfig';
 
-export default function UserDetailPanel({ user, onClose }) {
+export default function UserDetailPanel({
+    user,
+    manager,
+    onClose,
+    onUserUpdated,
+    onManagerUpdated,
+    onAccessRevoked,
+}) {
     const [planType, setPlanType] = useState(() => getInitialPlan(user));
-    const [paymentMethod, setPaymentMethod] = useState(() => getInitialPaymentMethod(user));
-    const [reference, setReference] = useState(() => getInitialReference(user));
+    const [reference, setReference] = useState('');
+    const [customerPaymentReceived, setCustomerPaymentReceived] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
     const [feedback, setFeedback] = useState({ type: '', message: '' });
 
     const nextEndDate = useMemo(() => formatDate(getPlanEndMillis(planType), true), [planType]);
-    const activateLabel = user.status === 'paid'
-        ? 'Update Plan'
-        : user.status === 'expired'
-            ? 'Reactivate Plan'
-            : 'Activate Plan';
-    const referenceLabel = paymentMethod === 'google_play'
-        ? 'Order ID / token'
-        : paymentMethod === 'razorpay'
-            ? 'Payment ID'
-            : 'Manual reference';
+    const activateLabel = 'Activate Plan';
+    const pendingAdminReceiptCount = Number(manager?.pendingAdminReceiptCount) || 0;
+    const hasPendingAdminDue = pendingAdminReceiptCount > 0;
+    const pendingDueLabel = manager?.latestPendingActivationUserName
+        ? `${manager.latestPendingActivationUserName}${manager.latestPendingPlanLabel ? ` - ${manager.latestPendingPlanLabel}` : ''}`
+        : '';
 
     const handleActivate = async () => {
+        if (hasPendingAdminDue) {
+            setFeedback({
+                type: 'error',
+                message: 'Clear your dues to admin before the next activation.',
+            });
+            return;
+        }
+
+        if (!customerPaymentReceived) {
+            setFeedback({
+                type: 'error',
+                message: 'Confirm that customer payment has been received before activating this plan.',
+            });
+            return;
+        }
+
         setIsSaving(true);
         setFeedback({ type: '', message: '' });
 
         try {
             const result = await activateUserPlan(user, {
                 planType,
-                paymentMethod,
+                paymentMethod: 'manager_panel',
                 reference,
+                customerPaymentReceived,
             });
+
+            if (result.user) {
+                onUserUpdated?.(result.user);
+            }
+
+            if (result.manager) {
+                onManagerUpdated?.(result.manager);
+            }
 
             setFeedback({
                 type: 'success',
-                message: `${activateLabel} successful. Ends on ${formatDate(result.endTimestamp, true)}.`,
+                message: `${activateLabel} successful. Ends on ${formatDate(result.endTimestamp, true)}. Admin receipt is now pending for this activation.`,
             });
+            setCustomerPaymentReceived(false);
         } catch (error) {
             console.error('Failed to activate plan:', error);
+
+            if (error?.status === 401 || error?.status === 403) {
+                onAccessRevoked?.(error);
+            }
+
+            const dueMessage = error?.details?.code === 'clear_admin_dues_required'
+                ? `${error.message}${error.details?.latestPendingActivation?.userName
+                    ? ` Pending: ${error.details.latestPendingActivation.userName}${error.details.latestPendingActivation.planLabel
+                        ? ` - ${error.details.latestPendingActivation.planLabel}`
+                        : ''}.`
+                    : ''
+                }`
+                : '';
+
             setFeedback({
                 type: 'error',
-                message: error.message || 'Failed to update the user plan.',
-            });
-        } finally {
-            setIsSaving(false);
-        }
-    };
-
-    const handleDeactivate = async () => {
-        const shouldContinue = window.confirm(`Deactivate ${user.name}'s current plan and move this user to free?`);
-        if (!shouldContinue) return;
-
-        setIsSaving(true);
-        setFeedback({ type: '', message: '' });
-
-        try {
-            await deactivateUserPlan(user);
-            setFeedback({
-                type: 'success',
-                message: 'Plan deactivated. User is now on the free limits.',
-            });
-        } catch (error) {
-            console.error('Failed to deactivate plan:', error);
-            setFeedback({
-                type: 'error',
-                message: error.message || 'Failed to deactivate the user plan.',
+                message: dueMessage || error.message || 'Failed to update the user plan.',
             });
         } finally {
             setIsSaving(false);
@@ -79,7 +110,7 @@ export default function UserDetailPanel({ user, onClose }) {
                 <div className="border-b border-white/10 p-5">
                     <div className="flex items-start justify-between gap-4">
                         <div className="min-w-0">
-                            <p className="text-sm font-semibold text-primary">User Details</p>
+                            <p className="text-sm font-semibold text-cyan-300">Customer Details</p>
                             <h2 className="mt-1 truncate text-2xl font-bold text-white">{user.name}</h2>
                             <p className="mt-1 truncate text-sm text-slate-400">{user.email}</p>
                         </div>
@@ -97,7 +128,7 @@ export default function UserDetailPanel({ user, onClose }) {
                     <div className="flex flex-wrap gap-2">
                         <Badge className={statusBadgeClass(user.status)}>{statusLabel(user.status)}</Badge>
                         <Badge className={methodBadgeClass(user.paymentMethod.id)}>{user.paymentMethod.label}</Badge>
-                        <Badge className="border-sky-400/30 bg-sky-500/10 text-sky-100">{user.plan}</Badge>
+                        <Badge className="border-cyan-400/30 bg-cyan-500/10 text-cyan-100">{user.plan}</Badge>
                     </div>
 
                     <DetailSection title="Profile">
@@ -114,7 +145,15 @@ export default function UserDetailPanel({ user, onClose }) {
                         <DetailRow label="Plan" value={user.plan} />
                         <DetailRow label="Activation date" value={formatDate(user.activationMillis, true)} />
                         <DetailRow label="End date" value={formatDate(user.endMillis, true)} />
-                        <DetailRow label="Account state" value={user.accountState || 'Not recorded'} />
+                        <DetailRow label="Current owner" value={user.managerName || user.managerEmail || 'Not assigned'} />
+                        <DetailRow
+                            label="Admin receipt"
+                            value={user.adminPaymentReceived
+                                ? `Received on ${formatDate(user.adminPaymentReceivedMillis, true)}`
+                                : user.adminReceiptStatus === 'pending'
+                                    ? 'Pending with admin'
+                                    : 'Not recorded'}
+                        />
                     </DetailSection>
 
                     <DetailSection title="Payment">
@@ -135,16 +174,25 @@ export default function UserDetailPanel({ user, onClose }) {
                         />
                         <DetailRow label="Joined" value={formatDate(user.joinedMillis, true)} />
                         <DetailRow label="Last seen" value={formatDate(user.lastSeenMillis, true)} />
-                        <DetailRow label="Source collections" value={user.sourceCollections || 'Not recorded'} />
                     </DetailSection>
 
-                    <DetailSection title="Plan Controls">
+                    <DetailSection title="Activate Plan">
                         <div className="space-y-4">
+                            {hasPendingAdminDue && (
+                                <div className="rounded-2xl border border-amber-400/30 bg-amber-500/10 p-4 text-sm text-amber-50">
+                                    <p className="font-semibold text-white">Clear your dues to admin</p>
+                                    <p className="mt-2">
+                                        Another activation will unlock after admin marks your previous payment as received.
+                                        {pendingDueLabel ? ` Pending: ${pendingDueLabel}.` : ''}
+                                    </p>
+                                </div>
+                            )}
+
                             <ControlField label="Plan type">
                                 <select
                                     value={planType}
                                     onChange={(event) => setPlanType(event.target.value)}
-                                    className="w-full rounded-lg border border-white/10 bg-dark-900 px-4 py-3 text-sm text-white outline-none transition focus:border-primary"
+                                    className="w-full rounded-lg border border-white/10 bg-dark-900 px-4 py-3 text-sm text-white outline-none transition focus:border-cyan-300"
                                 >
                                     {PLAN_OPTIONS.map((plan) => (
                                         <option key={plan.id} value={plan.id} className="bg-slate-950">
@@ -154,37 +202,35 @@ export default function UserDetailPanel({ user, onClose }) {
                                 </select>
                             </ControlField>
 
-                            <ControlField label="Activation source">
-                                <select
-                                    value={paymentMethod}
-                                    onChange={(event) => setPaymentMethod(event.target.value)}
-                                    className="w-full rounded-lg border border-white/10 bg-dark-900 px-4 py-3 text-sm text-white outline-none transition focus:border-primary"
-                                >
-                                    {PAYMENT_SOURCE_OPTIONS.map((source) => (
-                                        <option key={source.id} value={source.id} className="bg-slate-950">
-                                            {source.label}
-                                        </option>
-                                    ))}
-                                </select>
-                            </ControlField>
-
-                            <ControlField label={referenceLabel}>
+                            <ControlField label="Reference note">
                                 <input
                                     value={reference}
                                     onChange={(event) => setReference(event.target.value)}
-                                    placeholder="Optional reference"
-                                    className="w-full rounded-lg border border-white/10 bg-dark-900 px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-primary"
+                                    placeholder="Optional internal note"
+                                    className="w-full rounded-lg border border-white/10 bg-dark-900 px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-cyan-300"
                                 />
                             </ControlField>
 
-                            <div className="rounded-lg border border-white/10 bg-dark-900 p-4 text-sm text-slate-300">
-                                <p className="font-semibold text-white">Manual activation preview</p>
+                            <label className="flex items-start gap-3 rounded-2xl border border-white/10 bg-dark-900 p-4">
+                                <input
+                                    type="checkbox"
+                                    checked={customerPaymentReceived}
+                                    onChange={(event) => setCustomerPaymentReceived(event.target.checked)}
+                                    className="mt-1 h-4 w-4 rounded border-white/20 bg-dark-900 text-cyan-300 focus:ring-cyan-300"
+                                />
+                                <div>
+                                    <p className="text-sm font-semibold text-white">Payment received from customer</p>
+                                    <p className="mt-1 text-sm text-slate-400">
+                                        Tick yes only after you have received the customer payment for this activation.
+                                    </p>
+                                </div>
+                            </label>
+
+                            <div className="rounded-2xl border border-cyan-400/20 bg-cyan-500/10 p-4 text-sm text-cyan-50">
+                                <p className="font-semibold text-white">Activation preview</p>
                                 <p className="mt-2">
-                                    This will grant unlimited contacts and groups, set the plan to <span className="font-semibold text-primary">{getPlanLabel(planType)}</span>,
-                                    and expire it on {nextEndDate}.
-                                </p>
-                                <p className="mt-2 text-xs text-slate-500">
-                                    Writes to the available `email_data` and `userDetails` documents for this user.
+                                    You are activating <span className="font-semibold text-cyan-100">{getPlanLabel(planType)}</span> for this customer.
+                                    It will expire on {nextEndDate}.
                                 </p>
                             </div>
 
@@ -198,24 +244,14 @@ export default function UserDetailPanel({ user, onClose }) {
                                 </div>
                             )}
 
-                            <div className="grid gap-3 sm:grid-cols-2">
-                                <button
-                                    type="button"
-                                    onClick={handleActivate}
-                                    disabled={isSaving}
-                                    className="rounded-lg bg-primary px-4 py-3 text-sm font-bold text-slate-950 transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-60"
-                                >
-                                    {isSaving ? 'Saving...' : activateLabel}
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={handleDeactivate}
-                                    disabled={isSaving}
-                                    className="rounded-lg border border-rose-400/40 bg-rose-500/10 px-4 py-3 text-sm font-bold text-rose-100 transition hover:bg-rose-500/15 disabled:cursor-not-allowed disabled:opacity-60"
-                                >
-                                    {isSaving ? 'Saving...' : 'Deactivate Plan'}
-                                </button>
-                            </div>
+                            <button
+                                type="button"
+                                onClick={handleActivate}
+                                disabled={isSaving || hasPendingAdminDue || !customerPaymentReceived}
+                                className="w-full rounded-full bg-cyan-300 px-4 py-3 text-sm font-bold text-slate-950 transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                                {isSaving ? 'Saving...' : activateLabel}
+                            </button>
                         </div>
                     </DetailSection>
                 </div>
@@ -227,7 +263,7 @@ export default function UserDetailPanel({ user, onClose }) {
 function DetailSection({ title, children }) {
     return (
         <section className="rounded-lg border border-white/10 bg-dark-800 p-4">
-            <h3 className="mb-3 text-sm font-bold uppercase tracking-[0.14em] text-primary">{title}</h3>
+            <h3 className="mb-3 text-sm font-bold uppercase tracking-[0.14em] text-cyan-200">{title}</h3>
             <div className="space-y-3">{children}</div>
         </section>
     );
@@ -253,17 +289,4 @@ function ControlField({ label, children }) {
 
 function getInitialPlan(user) {
     return isKnownPlan(user.rawPlan) ? user.rawPlan : 'monthly';
-}
-
-function getInitialPaymentMethod(user) {
-    return user.paymentMethod.id !== 'unknown' ? user.paymentMethod.id : 'admin_panel';
-}
-
-function getInitialReference(user) {
-    const paymentMethod = getInitialPaymentMethod(user);
-    if (paymentMethod === 'google_play') {
-        return user.lastOrderId || user.lastPurchaseToken || '';
-    }
-
-    return user.lastPaymentId || '';
 }

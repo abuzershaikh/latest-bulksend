@@ -1,6 +1,7 @@
 package com.message.bulksend.bulksenderaiagent
 
 import android.app.Application
+import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.lifecycle.AndroidViewModel
@@ -24,15 +25,33 @@ import kotlinx.coroutines.launch
 class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val appContext = getApplication<Application>()
     private val contactsRepository = ContactsRepository(appContext)
+    private val languagePrefs =
+        appContext.getSharedPreferences(LANGUAGE_PREFS_NAME, Context.MODE_PRIVATE)
+    private var isLanguageManuallySelected =
+        languagePrefs.getBoolean(KEY_LANGUAGE_MANUAL, false)
 
-    private val _language = MutableStateFlow(ChatLanguage.ENGLISH)
+    private val _language = MutableStateFlow(
+        AgentLanguageText.fromStored(languagePrefs.getString(KEY_LANGUAGE, null))
+    )
     val language: StateFlow<ChatLanguage> = _language.asStateFlow()
 
     private val _messages = MutableStateFlow(
         listOf(
             ChatMessage(
-                text = "I will help you set up your bulk send campaign with a guided native flow. We can handle groups, campaign name, message, campaign type, files, and permissions right here.",
-                type = MessageType.TEXT_BOT
+                text = AgentLanguageText.resolve(
+                    language = _language.value,
+                    english = "I will help you set up your bulk send campaign with a guided native flow. We can handle groups, campaign name, message, campaign type, files, and permissions right here.",
+                    hinglish = "Main guided native flow ke saath aapka bulk send campaign setup karne me help karunga. Yahin group, campaign name, message, campaign type, files aur permissions sab handle kar lenge."
+                ),
+                type = MessageType.TEXT_BOT,
+                voiceRequest = buildTextVoiceRequest(
+                    AgentLanguageText.resolve(
+                        language = _language.value,
+                        english = "I will help you set up your bulk send campaign with a guided native flow. We can handle groups, campaign name, message, campaign type, files, and permissions right here.",
+                        hinglish = "Main guided native flow ke saath aapka bulk send campaign setup karne me help karunga. Yahin group, campaign name, message, campaign type, files aur permissions sab handle kar lenge."
+                    ),
+                    _language.value
+                )
             )
         )
     )
@@ -69,6 +88,17 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         refreshEnvironment()
     }
 
+    fun setLanguage(language: ChatLanguage) {
+        val hasChanged = _language.value != language
+        updateLanguage(language = language, manualSelection = true)
+        if (hasChanged) {
+            addBotMessage(
+                english = "Language switched to ${AgentLanguageText.label(language)}. I will continue in English.",
+                hindi = "Language ${AgentLanguageText.label(language)} par set ho gayi hai. Main ab Hinglish me continue karunga."
+            )
+        }
+    }
+
     fun sendMessage(text: String) {
         val trimmed = text.trim()
         if (trimmed.isBlank()) return
@@ -87,34 +117,15 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             AgentStep.ENTER_CAMPAIGN_NAME -> saveCampaignName(trimmed)
             AgentStep.ENTER_MESSAGE -> saveCampaignMessage(trimmed)
             AgentStep.SELECT_CAMPAIGN_TYPE -> handleCampaignTypeInput(trimmed.lowercase())
-            AgentStep.PICK_MEDIA -> {
-                addBotMessage(
-                    english = "Use the file picker card below to choose an image, video, or PDF, or type 'pick file' and I will open it for you.",
-                    hindi = "Niche file picker card se image, video ya PDF choose karo, ya 'pick file' likho aur main open kar dunga."
-                )
-            }
-            AgentStep.PICK_SHEET -> {
-                addBotMessage(
-                    english = "Use the sheet picker card below to choose an Excel or CSV file, or type 'pick sheet' and I will open it for you.",
-                    hindi = "Niche sheet picker card se Excel ya CSV file choose karo, ya 'pick sheet' likho aur main open kar dunga."
-                )
-            }
-            AgentStep.REVIEW_PERMISSIONS -> {
-                refreshEnvironment()
-                if (!_permissionChecklist.value.requiredReady) {
-                    addBotMessage(buildMissingPermissionMessage())
-                }
-            }
-            AgentStep.READY_TO_LAUNCH -> {
-                addBotMessage(
-                    english = "Everything is ready. Tap the launch card or type 'launch campaign' and I will open the filled screen.",
-                    hindi = "Sab ready hai. Launch card tap karo ya 'launch campaign' likho, main filled screen open kar dunga."
-                )
-            }
+            AgentStep.SELECT_WHATSAPP_APP -> handleWhatsAppTargetInput(trimmed.lowercase())
+            AgentStep.PICK_MEDIA,
+            AgentStep.PICK_SHEET,
+            AgentStep.REVIEW_PERMISSIONS,
+            AgentStep.READY_TO_LAUNCH -> remindCurrentStep(includeMessage = true)
             AgentStep.INITIALIZING -> {
                 addBotMessage(
                     english = "One moment. I am checking your saved groups and permissions.",
-                    hindi = "Ek second, main aapke saved groups aur permissions check kar raha hoon."
+                    hindi = "Ek sec, main aapke saved groups aur permissions check kar raha hoon."
                 )
             }
         }
@@ -129,7 +140,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         addUserMessage(group.name)
         addBotMessage(
             english = "`" + group.name + "` is selected.",
-            hindi = "`" + group.name + "` select ho gaya."
+            hindi = "`" + group.name + "` select ho gaya hai."
         )
         promptNextMissingStep()
     }
@@ -139,7 +150,26 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         addUserMessage(type.displayTitle(_language.value))
         addBotMessage(
             english = type.displayTitle(_language.value) + " selected.",
-            hindi = type.displayTitle(_language.value) + " select ho gaya."
+            hindi = type.displayTitle(_language.value) + " select ho gaya hai."
+        )
+        promptNextMissingStep()
+    }
+
+    fun onWhatsAppTargetSelected(target: WhatsAppTarget) {
+        if (!_permissionChecklist.value.isTargetAvailable(target)) {
+            addBotMessage(
+                english = "${target.displayTitle(_language.value)} is not installed on this device yet.",
+                hindi = "${target.displayTitle(_language.value)} abhi is device par installed nahi hai."
+            )
+            showCard(MessageType.CARD_WHATSAPP_APPS)
+            return
+        }
+
+        applyWhatsAppTargetSelection(target)
+        addUserMessage(target.displayTitle(_language.value))
+        addBotMessage(
+            english = target.displayTitle(_language.value) + " selected.",
+            hindi = target.displayTitle(_language.value) + " select ho gaya hai."
         )
         promptNextMissingStep()
     }
@@ -148,18 +178,18 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         if (_groups.value.isEmpty()) {
             addBotMessage(
                 english = "I am refreshing your groups. If the group was saved, it should appear here in a moment.",
-                hindi = "Main groups refresh kar raha hoon. Agar group save ho gaya hai to ek second me yahin dikhega."
+                hindi = "Main groups refresh kar raha hoon. Agar group save ho gaya hoga to thodi der me yahin dikhega."
             )
             _step.value = AgentStep.WAITING_FOR_CONTACTS
-            appendCardOnce(MessageType.CARD_ADD_CONTACT)
+            showCard(MessageType.CARD_ADD_CONTACT)
             return
         }
 
         addBotMessage(
             english = "Your group is saved. Now choose the group you want to use.",
-            hindi = "Group save ho gaya. Ab jis group ko use karna hai usse select karo."
+            hindi = "Group save ho gaya hai. Ab jo group use karna hai, woh select kar lo."
         )
-        appendCardOnce(MessageType.CARD_GROUP_LIST)
+        showCard(MessageType.CARD_GROUP_LIST)
         _step.value = AgentStep.SELECT_GROUP
     }
 
@@ -174,7 +204,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         addUserMessage(fileName)
         addBotMessage(
             english = "The file is attached.",
-            hindi = "File attach ho gayi."
+            hindi = "File attach ho gayi hai."
         )
         promptNextMissingStep()
     }
@@ -210,28 +240,38 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
 
-        appendCardOnce(MessageType.CARD_PERMISSION_CHECKLIST)
+        showCard(MessageType.CARD_PERMISSION_CHECKLIST)
+
+        if (currentDraft.whatsAppTarget == null && status.availableWhatsAppTargets().isNotEmpty()) {
+            _step.value = AgentStep.SELECT_WHATSAPP_APP
+            hasAnnouncedReady = false
+            showCard(MessageType.CARD_WHATSAPP_APPS)
+            return
+        }
 
         if (status.requiredReady) {
             _step.value = AgentStep.READY_TO_LAUNCH
-            appendCardOnce(MessageType.CARD_LAUNCH_CAMPAIGN)
+            showCard(MessageType.CARD_LAUNCH_CAMPAIGN)
             if (!hasAnnouncedReady) {
                 hasAnnouncedReady = true
                 addBotMessage(
-                    english = "All required permissions are ready. You can open the filled campaign screen now.",
-                    hindi = "Sab required permissions ready hain. Ab aap filled campaign screen open kar sakte ho."
+                    english = "All required permissions are ready. Open the filled campaign screen now, then click the Launch button there.",
+                    hindi = "Sab required permissions ready hain. Ab filled campaign screen kholo, phir wahan Launch button click karo."
                 )
             }
         } else {
             _step.value = AgentStep.REVIEW_PERMISSIONS
             hasAnnouncedReady = false
+            showCard(MessageType.CARD_PERMISSION_CHECKLIST)
         }
     }
 
     fun buildLaunchRequest(): CampaignLaunchRequest? {
         val currentDraft = _draft.value
         val campaignType = currentDraft.campaignType ?: return null
+        val whatsAppTarget = currentDraft.whatsAppTarget ?: return null
         if (!currentDraft.isSetupComplete()) return null
+        if (!_permissionChecklist.value.isTargetAvailable(whatsAppTarget)) return null
 
         return CampaignLaunchRequest(
             campaignType = campaignType,
@@ -240,6 +280,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             campaignName = currentDraft.campaignName,
             countryCode = currentDraft.countryCode,
             message = currentDraft.message,
+            whatsAppTarget = whatsAppTarget,
             mediaUri = currentDraft.mediaUri,
             sheetUri = currentDraft.sheetUri
         )
@@ -259,16 +300,17 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     if (filteredGroups.isEmpty()) {
                         addBotMessage(
                             english = "I could not find any saved group yet. Use Add Contact Now below to create your first group.",
-                            hindi = "Abhi koi saved group nahi mila. Neeche Add Contact Now se pehla group bana lo."
+                            hindi = "Abhi koi saved group nahi mila. Neeche 'Abhi Group Banao' par tap karke apna pehla group bana lo.",
+                            voiceRequest = contactAddHelpVoiceRequest()
                         )
-                        appendCardOnce(MessageType.CARD_ADD_CONTACT)
+                        showCard(MessageType.CARD_ADD_CONTACT)
                         _step.value = AgentStep.WAITING_FOR_CONTACTS
                     } else {
                         addBotMessage(
                             english = "I found ${filteredGroups.size} saved groups. Do you want to use an existing group or create a new one?",
-                            hindi = "Maine ${filteredGroups.size} saved groups fetch kar liye. Purana group use karna hai ya naya banana hai?"
+                            hindi = "Mujhe ${filteredGroups.size} saved groups mile hain. Saved group use karna hai ya naya banana hai?"
                         )
-                        appendCardOnce(MessageType.CHIPS_CONTACT_OPTIONS)
+                        showCard(MessageType.CHIPS_CONTACT_OPTIONS)
                         _step.value = AgentStep.SELECT_CONTACT_SOURCE
                     }
                     return@collect
@@ -277,9 +319,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 if (_step.value == AgentStep.WAITING_FOR_CONTACTS && filteredGroups.isNotEmpty() && !_draft.value.hasGroup()) {
                     addBotMessage(
                         english = "Your new group is visible now. Select it to continue.",
-                        hindi = "Naya group list me aa gaya. Ab usse select karo."
+                        hindi = "Aapka naya group list me aa gaya hai. Ab usse select kar lo."
                     )
-                    appendCardOnce(MessageType.CARD_GROUP_LIST)
+                    showCard(MessageType.CARD_GROUP_LIST)
                     _step.value = AgentStep.SELECT_GROUP
                 }
             }
@@ -296,40 +338,47 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             }
             containsAny(normalized, "summary", "status", "progress", "what is set", "kya set", "setup summary") -> {
                 addBotMessage(buildProgressSummary())
+                remindCurrentStep(includeMessage = false)
                 return true
             }
             containsAny(normalized, "help", "what can you do", "guide me", "kaise", "samjha", "madad") -> {
                 addBotMessage(buildHelpMessage())
+                remindCurrentStep(includeMessage = true)
                 return true
             }
             containsAny(normalized, "recommend", "suggest", "which type", "what type", "best campaign", "kaunsa type") -> {
                 addBotMessage(buildRecommendationMessage(normalized))
+                remindCurrentStep(includeMessage = true)
                 return true
             }
             containsAny(normalized, "difference", "farak", "caption vs", "text media vs") -> {
                 addBotMessage(buildTypeDifferenceMessage())
+                remindCurrentStep(includeMessage = true)
                 return true
             }
             containsAny(normalized, "why accessibility", "accessibility kyu", "what is accessibility") -> {
                 addBotMessage(buildAccessibilityHelp())
+                remindCurrentStep(includeMessage = true)
                 return true
             }
             containsAny(normalized, "why overlay", "overlay kyu", "what is overlay") -> {
                 addBotMessage(buildOverlayHelp())
+                remindCurrentStep(includeMessage = true)
                 return true
             }
             containsAny(normalized, "launch campaign", "open campaign", "start campaign", "open filled screen", "launch now") -> {
                 if (_permissionChecklist.value.requiredReady && buildLaunchRequest() != null) {
                     addBotMessage(
-                        english = "Opening the filled campaign screen now.",
-                        hindi = "Filled campaign screen abhi open kar raha hoon."
+                        english = "Opening the filled campaign screen now. After it opens, click the Launch button there.",
+                        hindi = "Filled campaign screen abhi khol raha hoon. Screen khulne ke baad wahan Launch button click karo."
                     )
                     emitUiAction(AgentUiAction.LaunchCampaign)
                 } else {
                     addBotMessage(
                         english = "We still need to finish the setup before launching. Type 'summary' to see what is missing.",
-                        hindi = "Launch se pehle setup complete karna hoga. Kya missing hai dekhne ke liye 'summary' likho."
+                        hindi = "Launch se pehle setup complete karna hoga. Kya baaki hai dekhne ke liye 'summary' likho."
                     )
+                    remindCurrentStep(includeMessage = false)
                 }
                 return true
             }
@@ -348,12 +397,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 applyGroupSelection(_groups.value.first())
                 addBotMessage(
                     english = "I selected your only saved group automatically.",
-                    hindi = "Maine aapka ek hi saved group automatically select kar diya."
+                    hindi = "Aapka ek hi saved group tha, maine usse automatically select kar diya."
                 )
                 promptNextMissingStep()
                 return true
             }
             addBotMessage(buildProgressSummary())
+            remindCurrentStep(includeMessage = false)
             return true
         }
 
@@ -364,7 +414,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         if (containsAny(normalized, "add contact", "open contacts", "contact screen", "open contact list")) {
             addBotMessage(
                 english = "Opening the contact screen for you.",
-                hindi = "Main contact screen open kar raha hoon."
+                hindi = "Main contacts screen khol raha hoon."
             )
             emitUiAction(AgentUiAction.OpenAddContact)
             return true
@@ -373,7 +423,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         if (_step.value == AgentStep.PICK_MEDIA && containsAny(normalized, "pick file", "pick media", "browse file", "attach file", "choose file")) {
             addBotMessage(
                 english = "Opening the file picker.",
-                hindi = "Main file picker open kar raha hoon."
+                hindi = "Main file picker khol raha hoon."
             )
             emitUiAction(AgentUiAction.PickAttachment(AttachmentKind.MEDIA))
             return true
@@ -382,7 +432,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         if (_step.value == AgentStep.PICK_SHEET && containsAny(normalized, "pick sheet", "browse sheet", "choose sheet", "attach sheet", "open sheet")) {
             addBotMessage(
                 english = "Opening the sheet picker.",
-                hindi = "Main sheet picker open kar raha hoon."
+                hindi = "Main sheet picker khol raha hoon."
             )
             emitUiAction(AgentUiAction.PickAttachment(AttachmentKind.SHEET))
             return true
@@ -433,7 +483,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         extractExplicitMessage(rawText)?.let { message ->
             if (message.isNotBlank() && message != _draft.value.message) {
                 _draft.update { it.copy(message = message) }
-                appendCardOnce(MessageType.CARD_CAMPAIGN_TYPES)
                 updates += localized("Message saved", "Message save ho gaya")
                 changed = true
             }
@@ -447,13 +496,24 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
+        detectWhatsAppTargetFromText(normalized)?.let { target ->
+            if (_permissionChecklist.value.isTargetAvailable(target) && _draft.value.whatsAppTarget != target) {
+                applyWhatsAppTargetSelection(target)
+                updates += localized(
+                    "App: ${target.displayTitle(_language.value)}",
+                    "App: ${target.displayTitle(_language.value)}"
+                )
+                changed = true
+            }
+        }
+
         if (!changed) {
             return false
         }
 
         addBotMessage(
             english = "Got it. " + updates.joinToString(" | "),
-            hindi = "Theek hai. " + updates.joinToString(" | ")
+            hindi = "Theek hai, maine yeh update kar diya: " + updates.joinToString(" | ")
         )
         promptNextMissingStep()
         return true
@@ -470,8 +530,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             else -> {
                 addBotMessage(
                     english = "Use one of the buttons: 'Use Existing Group' or 'Create New Group'.",
-                    hindi = "Buttons use kar lo: 'Proceed with Old Contacts' ya 'Create New Group'."
+                    hindi = "Neeche wale buttons use kar lo: 'Saved Group Use Karo' ya 'Naya Group Banao'."
                 )
+                showCard(MessageType.CHIPS_CONTACT_OPTIONS)
             }
         }
     }
@@ -480,9 +541,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         if (echoSelection) {
             addUserMessage(
                 if (option == "old") {
-                    localized("Use Existing Group", "Proceed with Old Contacts")
+                    localized("Use Existing Group", "Saved Group Use Karo")
                 } else {
-                    localized("Create New Group", "Create New Group")
+                    localized("Create New Group", "Naya Group Banao")
                 }
             )
         }
@@ -491,24 +552,25 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             if (_groups.value.isEmpty()) {
                 addBotMessage(
                     english = "I still cannot find any saved groups. Please create a new group first.",
-                    hindi = "Saved groups abhi nahi mile. Pehle naya group bana lo."
+                    hindi = "Abhi bhi koi saved group nahi mila. Pehle naya group bana lo."
                 )
-                appendCardOnce(MessageType.CARD_ADD_CONTACT)
+                showCard(MessageType.CARD_ADD_CONTACT)
                 _step.value = AgentStep.WAITING_FOR_CONTACTS
             } else {
                 addBotMessage(
                     english = "Here are your saved groups. Select the one you want to use.",
-                    hindi = "Yeh rahe saved groups. Jis group ko use karna hai usse select karo."
+                    hindi = "Yeh rahe aapke saved groups. Jo group use karna hai, use select kar lo."
                 )
-                appendCardOnce(MessageType.CARD_GROUP_LIST)
+                showCard(MessageType.CARD_GROUP_LIST)
                 _step.value = AgentStep.SELECT_GROUP
             }
         } else {
             addBotMessage(
                 english = "Tap Add Contact Now, save a group, and come back here. I will continue from the next step.",
-                hindi = "Add Contact Now par tap karo aur group save karke wapas aao. Main yahin se next step continue karunga."
+                hindi = "'Abhi Group Banao' par tap karo, group save karo, phir yahan wapas aao. Main yahin se continue karunga.",
+                voiceRequest = contactAddHelpVoiceRequest()
             )
-            appendCardOnce(MessageType.CARD_ADD_CONTACT)
+            showCard(MessageType.CARD_ADD_CONTACT)
             _step.value = AgentStep.WAITING_FOR_CONTACTS
         }
     }
@@ -519,8 +581,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         } else {
             addBotMessage(
                 english = "Save the group first, then type 'done' or say 'open contacts' and I will take you there.",
-                hindi = "Pehle group save karo. Uske baad 'done' likho ya 'open contacts' bolo aur main le jaunga."
+                hindi = "Pehle group save karo. Uske baad 'done' likho ya 'open contacts' bolo, main le jaunga."
             )
+            showCard(MessageType.CARD_ADD_CONTACT)
         }
     }
 
@@ -529,15 +592,16 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         if (group == null) {
             addBotMessage(
                 english = "I could not match that group clearly. It is better to tap the group card below.",
-                hindi = "Mujhe exact group match nahi mila. Better hoga ki niche group card par tap kar lo."
+                hindi = "Mujhe exact group match nahi mila. Neeche group card par tap karna better rahega."
             )
+            showCard(MessageType.CARD_GROUP_LIST)
             return
         }
 
         applyGroupSelection(group)
         addBotMessage(
             english = "`" + group.name + "` is selected.",
-            hindi = "`" + group.name + "` select ho gaya."
+            hindi = "`" + group.name + "` select ho gaya hai."
         )
         promptNextMissingStep()
     }
@@ -546,7 +610,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         if (name.isBlank()) {
             addBotMessage(
                 english = "The campaign name cannot be blank. Send me a short campaign name.",
-                hindi = "Campaign name blank nahi rehna chahiye. Ek short naam bhejo."
+                hindi = "Campaign name blank mat chhodo. Ek short naam bhej do."
             )
             return
         }
@@ -554,7 +618,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _draft.update { it.copy(campaignName = name) }
         addBotMessage(
             english = "Great. Campaign name saved.",
-            hindi = "Badhiya. Campaign name save ho gaya."
+            hindi = "Badhiya, campaign name save ho gaya."
         )
         promptNextMissingStep()
     }
@@ -563,16 +627,15 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         if (message.isBlank()) {
             addBotMessage(
                 english = "The message cannot be blank. Type the text you want to send.",
-                hindi = "Message blank nahi ho sakta. Jo text bhejna hai woh type karo."
+                hindi = "Message blank nahi ho sakta. Jo message bhejna hai woh type karo."
             )
             return
         }
 
         _draft.update { it.copy(message = message) }
-        appendCardOnce(MessageType.CARD_CAMPAIGN_TYPES)
         addBotMessage(
             english = "Message saved.",
-            hindi = "Message save ho gaya."
+            hindi = "Message save ho gaya hai."
         )
         promptNextMissingStep()
     }
@@ -582,17 +645,32 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         if (type == null) {
             addBotMessage(
                 english = "Tap one of the campaign type cards below. You can also type 'text campaign', 'caption campaign', 'text and media', or 'sheet campaign'.",
-                hindi = "Campaign type card par tap karo. Ya 'text campaign', 'caption campaign', 'text and media', ya 'sheet campaign' likho."
+                hindi = "Neeche campaign type card par tap karo. Chaaho to 'text campaign', 'caption campaign', 'text and media', ya 'sheet campaign' bhi likh sakte ho."
             )
+            showCard(MessageType.CARD_CAMPAIGN_TYPES)
             return
         }
 
         applyCampaignType(type)
         addBotMessage(
             english = type.displayTitle(_language.value) + " selected.",
-            hindi = type.displayTitle(_language.value) + " select ho gaya."
+            hindi = type.displayTitle(_language.value) + " select ho gaya hai."
         )
         promptNextMissingStep()
+    }
+
+    private fun handleWhatsAppTargetInput(normalizedText: String) {
+        val target = detectWhatsAppTargetFromText(normalizedText)
+        if (target == null) {
+            addBotMessage(
+                english = "Choose WhatsApp or WhatsApp Business from the cards below. You can also type 'use WhatsApp' or 'use WhatsApp Business'.",
+                hindi = "Neeche wale cards se WhatsApp ya WhatsApp Business choose karo. Chaaho to 'use WhatsApp' ya 'use WhatsApp Business' bhi likh sakte ho."
+            )
+            showCard(MessageType.CARD_WHATSAPP_APPS)
+            return
+        }
+
+        onWhatsAppTargetSelected(target)
     }
 
     private fun applyGroupSelection(group: Group) {
@@ -625,48 +703,53 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         hasAnnouncedReady = false
     }
 
+    private fun applyWhatsAppTargetSelection(target: WhatsAppTarget) {
+        _draft.update { it.copy(whatsAppTarget = target) }
+        hasAnnouncedReady = false
+    }
+
     private fun promptNextMissingStep() {
         val currentDraft = _draft.value
 
         when {
             !currentDraft.hasGroup() -> {
                 if (_groups.value.isEmpty()) {
-                    appendCardOnce(MessageType.CARD_ADD_CONTACT)
                     _step.value = AgentStep.WAITING_FOR_CONTACTS
                     addBotMessage(
                         english = "Please create a group first so we can continue.",
-                        hindi = "Continue karne ke liye pehle ek group banao."
+                        hindi = "Aage badhne ke liye pehle ek group banao."
                     )
+                    showCard(MessageType.CARD_ADD_CONTACT)
                 } else {
-                    appendCardOnce(MessageType.CARD_GROUP_LIST)
                     _step.value = AgentStep.SELECT_GROUP
                     addBotMessage(
                         english = "Now select the group you want to use.",
-                        hindi = "Ab jis group ko use karna hai usse select karo."
+                        hindi = "Ab jo group use karna hai, use select kar lo."
                     )
+                    showCard(MessageType.CARD_GROUP_LIST)
                 }
             }
             currentDraft.campaignName.isBlank() -> {
                 _step.value = AgentStep.ENTER_CAMPAIGN_NAME
                 addBotMessage(
                     english = "What would you like to name this campaign?",
-                    hindi = "Ab campaign name kya rakhna hai?"
+                    hindi = "Is campaign ka naam kya rakhna hai?"
                 )
             }
             currentDraft.message.isBlank() -> {
                 _step.value = AgentStep.ENTER_MESSAGE
                 addBotMessage(
                     english = "Now send the message you want to use in this campaign.",
-                    hindi = "Ab campaign me jo message bhejna hai woh type karo."
+                    hindi = "Ab campaign me jo message bhejna hai, woh type karo."
                 )
             }
             currentDraft.campaignType == null -> {
-                appendCardOnce(MessageType.CARD_CAMPAIGN_TYPES)
                 _step.value = AgentStep.SELECT_CAMPAIGN_TYPE
                 addBotMessage(
                     english = "Choose the campaign type now.",
-                    hindi = "Ab campaign type choose karo."
+                    hindi = "Ab campaign type choose kar lo."
                 )
+                showCard(MessageType.CARD_CAMPAIGN_TYPES)
             }
             currentDraft.campaignType.requiresSheetFile() && currentDraft.sheetUri.isNullOrBlank() -> {
                 _attachmentRequest.value = AttachmentRequest(
@@ -674,16 +757,16 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     title = localized("Choose a sheet file", "Sheet file choose karo"),
                     description = localized(
                         "Pick an Excel or CSV file so I can prepare the sheet campaign.",
-                        "Excel ya CSV file pick karo taaki main sheet campaign ready kar saku."
+                        "Excel ya CSV file pick karo, taaki main sheet campaign ready kar sakun."
                     ),
-                    buttonLabel = localized("Pick Sheet File", "Pick Sheet File")
+                    buttonLabel = localized("Pick Sheet File", "Sheet File Pick Karo")
                 )
-                appendCardOnce(MessageType.CARD_ATTACHMENT_REQUEST)
                 _step.value = AgentStep.PICK_SHEET
                 addBotMessage(
                     english = "Now choose your sheet file.",
-                    hindi = "Ab apni sheet file choose karo."
+                    hindi = "Ab apni sheet file choose kar lo."
                 )
+                showCard(MessageType.CARD_ATTACHMENT_REQUEST)
             }
             currentDraft.campaignType.requiresMediaAttachment() && currentDraft.mediaUri.isNullOrBlank() -> {
                 _attachmentRequest.value = AttachmentRequest(
@@ -691,21 +774,29 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     title = localized("Choose an image, video, or PDF", "Image, video ya PDF choose karo"),
                     description = localized(
                         "This campaign needs a file attachment before we continue.",
-                        "Is campaign ko continue karne ke liye file attachment zaroori hai."
+                        "Aage badhne se pehle is campaign ke liye file attachment zaroori hai."
                     ),
-                    buttonLabel = localized("Pick Media or PDF", "Pick Media / PDF")
+                    buttonLabel = localized("Pick Media or PDF", "Media Ya PDF Pick Karo")
                 )
-                appendCardOnce(MessageType.CARD_ATTACHMENT_REQUEST)
                 _step.value = AgentStep.PICK_MEDIA
                 addBotMessage(
                     english = "Attach the file for this campaign now.",
-                    hindi = "Is campaign ke liye ab file attach karo."
+                    hindi = "Ab is campaign ki file attach karo."
                 )
+                showCard(MessageType.CARD_ATTACHMENT_REQUEST)
+            }
+            currentDraft.whatsAppTarget == null && _permissionChecklist.value.availableWhatsAppTargets().isNotEmpty() -> {
+                _step.value = AgentStep.SELECT_WHATSAPP_APP
+                addBotMessage(
+                    english = "Choose where you want to launch this campaign: WhatsApp or WhatsApp Business.",
+                    hindi = "Ab choose karo campaign ko WhatsApp me launch karna hai ya WhatsApp Business me."
+                )
+                showCard(MessageType.CARD_WHATSAPP_APPS)
             }
             else -> {
                 addBotMessage(
                     english = "The setup is complete. I will review permissions now.",
-                    hindi = "Setup complete hai. Ab permissions review karte hain."
+                    hindi = "Setup complete hai. Ab permissions check karte hain."
                 )
                 moveToPermissionReview()
             }
@@ -714,30 +805,137 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun moveToPermissionReview() {
         _attachmentRequest.value = null
-        appendCardOnce(MessageType.CARD_PERMISSION_CHECKLIST)
         _step.value = AgentStep.REVIEW_PERMISSIONS
         refreshEnvironment()
         if (!_permissionChecklist.value.requiredReady) {
             addBotMessage(buildMissingPermissionMessage())
+            showCard(MessageType.CARD_PERMISSION_CHECKLIST)
+        }
+    }
+
+    private fun remindCurrentStep(includeMessage: Boolean) {
+        when (_step.value) {
+            AgentStep.SELECT_CONTACT_SOURCE -> {
+                if (includeMessage) {
+                    addBotMessage(
+                        english = "We still need to choose whether you want an existing group or a new group.",
+                        hindi = "Abhi yeh choose karna baaki hai ki saved group use karna hai ya naya group banana hai."
+                    )
+                }
+                showCard(MessageType.CHIPS_CONTACT_OPTIONS)
+            }
+            AgentStep.WAITING_FOR_CONTACTS -> {
+                if (includeMessage) {
+                    addBotMessage(
+                        english = "Please create or save the group first, then come back here and type 'done'.",
+                        hindi = "Pehle group create ya save karo, phir yahan aake 'done' likho."
+                    )
+                }
+                showCard(MessageType.CARD_ADD_CONTACT)
+            }
+            AgentStep.SELECT_GROUP -> {
+                if (_groups.value.isEmpty()) {
+                    if (includeMessage) {
+                        addBotMessage(
+                            english = "I still need a group before we can continue.",
+                            hindi = "Aage badhne se pehle mujhe ek group chahiye."
+                        )
+                    }
+                    showCard(MessageType.CARD_ADD_CONTACT)
+                } else {
+                    if (includeMessage) {
+                        addBotMessage(
+                            english = "We still need to select the group. Use the group card below to continue.",
+                            hindi = "Abhi group select karna baaki hai. Continue karne ke liye neeche group card use karo."
+                        )
+                    }
+                    showCard(MessageType.CARD_GROUP_LIST)
+                }
+            }
+            AgentStep.SELECT_CAMPAIGN_TYPE -> {
+                if (includeMessage) {
+                    addBotMessage(
+                        english = "We still need the campaign type. Choose one from the cards below.",
+                        hindi = "Abhi campaign type choose karna baaki hai. Neeche cards me se ek select karo."
+                    )
+                }
+                showCard(MessageType.CARD_CAMPAIGN_TYPES)
+            }
+            AgentStep.SELECT_WHATSAPP_APP -> {
+                if (includeMessage) {
+                    addBotMessage(
+                        english = "We still need to know whether to use WhatsApp or WhatsApp Business.",
+                        hindi = "Abhi yeh choose karna baaki hai ki WhatsApp use karna hai ya WhatsApp Business."
+                    )
+                }
+                showCard(MessageType.CARD_WHATSAPP_APPS)
+            }
+            AgentStep.PICK_MEDIA -> {
+                if (includeMessage) {
+                    addBotMessage(
+                        english = "This campaign still needs a media file. Use the picker card below.",
+                        hindi = "Is campaign ke liye abhi media file chahiye. Neeche picker card use karo."
+                    )
+                }
+                showCard(MessageType.CARD_ATTACHMENT_REQUEST)
+            }
+            AgentStep.PICK_SHEET -> {
+                if (includeMessage) {
+                    addBotMessage(
+                        english = "This campaign still needs the sheet file. Use the picker card below.",
+                        hindi = "Is campaign ke liye abhi sheet file chahiye. Neeche picker card use karo."
+                    )
+                }
+                showCard(MessageType.CARD_ATTACHMENT_REQUEST)
+            }
+            AgentStep.REVIEW_PERMISSIONS -> {
+                refreshEnvironment()
+                if (_step.value == AgentStep.READY_TO_LAUNCH) {
+                    if (includeMessage) {
+                        addBotMessage(
+                            english = "Everything is ready. Open the filled screen, then click the Launch button there.",
+                            hindi = "Sab ready hai. Filled screen kholo, phir wahan Launch button click karo."
+                        )
+                    }
+                    showCard(MessageType.CARD_LAUNCH_CAMPAIGN)
+                    return
+                }
+                if (!_permissionChecklist.value.requiredReady && includeMessage) {
+                    addBotMessage(buildMissingPermissionMessage())
+                }
+                showCard(MessageType.CARD_PERMISSION_CHECKLIST)
+            }
+            AgentStep.READY_TO_LAUNCH -> {
+                if (includeMessage) {
+                    addBotMessage(
+                        english = "Everything is ready. Open the filled screen, then click the Launch button there.",
+                        hindi = "Sab ready hai. Filled screen kholo, phir wahan Launch button click karo."
+                    )
+                }
+                showCard(MessageType.CARD_LAUNCH_CAMPAIGN)
+            }
+            else -> Unit
         }
     }
 
     private fun buildProgressSummary(): String {
         val currentDraft = _draft.value
         val nextStep = when {
-            !currentDraft.hasGroup() -> localized("Select a group", "Group select karo")
-            currentDraft.campaignName.isBlank() -> localized("Set the campaign name", "Campaign name set karo")
-            currentDraft.message.isBlank() -> localized("Send the campaign message", "Campaign message bhejo")
+            !currentDraft.hasGroup() -> localized("Select a group", "Group choose karo")
+            currentDraft.campaignName.isBlank() -> localized("Set the campaign name", "Campaign ka naam set karo")
+            currentDraft.message.isBlank() -> localized("Send the campaign message", "Message set karo")
             currentDraft.campaignType == null -> localized("Choose the campaign type", "Campaign type choose karo")
             currentDraft.campaignType.requiresMediaAttachment() && currentDraft.mediaUri.isNullOrBlank() -> localized("Attach the media file", "Media file attach karo")
             currentDraft.campaignType.requiresSheetFile() && currentDraft.sheetUri.isNullOrBlank() -> localized("Attach the sheet file", "Sheet file attach karo")
-            !_permissionChecklist.value.requiredReady -> localized("Review permissions", "Permissions review karo")
+            currentDraft.whatsAppTarget == null && _permissionChecklist.value.availableWhatsAppTargets().isNotEmpty() -> localized("Choose WhatsApp app", "WhatsApp app choose karo")
+            !_permissionChecklist.value.requiredReady -> localized("Review permissions", "Permissions check karo")
             else -> localized("Launch the campaign", "Campaign launch karo")
         }
 
-        val typeTitle = currentDraft.campaignType?.displayTitle(_language.value) ?: localized("Not selected", "Select nahi hua")
-        val mediaLabel = currentDraft.mediaName ?: localized("Not attached", "Attach nahi hua")
-        val sheetLabel = currentDraft.sheetName ?: localized("Not attached", "Attach nahi hua")
+        val typeTitle = currentDraft.campaignType?.displayTitle(_language.value) ?: localized("Not selected", "Abhi select nahi hua")
+        val whatsAppTitle = currentDraft.whatsAppTarget?.displayTitle(_language.value) ?: localized("Not selected", "Abhi select nahi hua")
+        val mediaLabel = currentDraft.mediaName ?: localized("Not attached", "Abhi attach nahi hua")
+        val sheetLabel = currentDraft.sheetName ?: localized("Not attached", "Abhi attach nahi hua")
 
         return localized(
             english = buildString {
@@ -746,27 +944,29 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 appendLine("Campaign name: ${currentDraft.campaignName.ifBlank { "Not set" }}")
                 appendLine("Message: ${if (currentDraft.message.isBlank()) "Not set" else "Ready"}")
                 appendLine("Type: $typeTitle")
+                appendLine("App: $whatsAppTitle")
                 appendLine("Media: $mediaLabel")
                 appendLine("Sheet: $sheetLabel")
                 append("Next: $nextStep")
             },
             hindi = buildString {
-                appendLine("Current setup:")
-                appendLine("Group: ${currentDraft.selectedGroupName ?: "Select nahi hua"}")
-                appendLine("Campaign name: ${currentDraft.campaignName.ifBlank { "Set nahi hua" }}")
-                appendLine("Message: ${if (currentDraft.message.isBlank()) "Set nahi hua" else "Ready"}")
+                appendLine("Abhi tak setup:")
+                appendLine("Group: ${currentDraft.selectedGroupName ?: "Abhi select nahi hua"}")
+                appendLine("Campaign name: ${currentDraft.campaignName.ifBlank { "Abhi set nahi hua" }}")
+                appendLine("Message: ${if (currentDraft.message.isBlank()) "Abhi set nahi hua" else "Ready hai"}")
                 appendLine("Type: $typeTitle")
+                appendLine("App: $whatsAppTitle")
                 appendLine("Media: $mediaLabel")
                 appendLine("Sheet: $sheetLabel")
-                append("Next: $nextStep")
+                append("Agla step: $nextStep")
             }
         )
     }
 
     private fun buildHelpMessage(): String {
         return localized(
-            english = "You can talk to me naturally. Examples: 'use marketing group', 'campaign name is Summer Sale', 'message: Hello #name#', 'caption campaign', 'pick file', 'summary', 'recommend a type', 'launch campaign', or 'reset'.",
-            hindi = "Aap naturally likh sakte ho. Example: 'marketing group use karo', 'campaign name Summer Sale', 'message: Hello #name#', 'caption campaign', 'pick file', 'summary', 'recommend a type', 'launch campaign', ya 'reset'."
+            english = "You can talk to me naturally. Examples: 'use marketing group', 'campaign name is Summer Sale', 'message: Hello #name#', 'caption campaign', 'use WhatsApp Business', 'pick file', 'summary', 'launch campaign', or 'reset'.",
+            hindi = "Aap bilkul normal tareeke se chat kar sakte ho. Jaise 'marketing group use karo', 'campaign name Summer Sale rakho', 'message: Hello #name#', 'caption campaign', 'use WhatsApp Business', 'pick file', 'summary', 'launch campaign' ya 'reset'."
         )
     }
 
@@ -783,19 +983,19 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         return when (recommendation) {
             CampaignType.TEXT -> localized(
                 "I recommend Text Campaign because it is the simplest option when you only need to send a text message.",
-                "Main Text Campaign recommend karta hoon kyunki jab sirf text bhejna ho to yeh sabse simple option hai."
+                "Meri recommendation Text Campaign hai, kyunki jab sirf text bhejna ho to yeh sabse simple option hota hai."
             )
             CampaignType.CAPTION -> localized(
                 "I recommend Caption Campaign because your file and caption can be sent together in one media message.",
-                "Main Caption Campaign recommend karta hoon kyunki file aur caption ek hi media message me bheje ja sakte hain."
+                "Meri recommendation Caption Campaign hai, kyunki isme file aur caption ek hi media message me saath chale jaate hain."
             )
             CampaignType.TEXT_MEDIA -> localized(
                 "I recommend Text + Media when you want the text and the file to go as separate messages.",
-                "Main Text + Media recommend karta hoon jab aap text aur file ko alag-alag messages me bhejna chahte ho."
+                "Agar aap text aur file ko alag-alag messages me bhejna chahte ho, to meri recommendation Text + Media hai."
             )
             CampaignType.SHEET -> localized(
                 "I recommend Sheet Campaign because your Excel or CSV data can personalize each message automatically.",
-                "Main Sheet Campaign recommend karta hoon kyunki Excel ya CSV data se har message automatically personalize ho jayega."
+                "Meri recommendation Sheet Campaign hai, kyunki Excel ya CSV data se har message automatically personalize ho jayega."
             )
         }
     }
@@ -803,21 +1003,21 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private fun buildTypeDifferenceMessage(): String {
         return localized(
             english = "Caption Campaign sends the file and caption together in one media message. Text + Media sends the text first and then sends the file separately. Use Caption for a single bundled send, and Text + Media when you want two separate messages.",
-            hindi = "Caption Campaign me file aur caption ek hi media message me jata hai. Text + Media me pehle text jata hai aur uske baad file alag se bheji jati hai. Ek bundled send chahiye to Caption, aur alag-alag do messages chahiye to Text + Media use karo."
+            hindi = "Caption Campaign me file aur caption ek hi media message me saath jaate hain. Text + Media me pehle text jata hai, phir file alag se bheji jati hai. Agar ek bundled send chahiye to Caption use karo, aur agar do alag messages chahiye to Text + Media better rahega."
         )
     }
 
     private fun buildAccessibilityHelp(): String {
         return localized(
             english = "Accessibility Service lets the app automate the send action inside WhatsApp. Without it, bulk send cannot tap the send button for you.",
-            hindi = "Accessibility Service app ko WhatsApp ke andar send action automate karne deta hai. Iske bina bulk send aapke liye send button tap nahi kar sakta."
+            hindi = "Accessibility Service ki help se app WhatsApp ke andar send action automate karta hai. Iske bina bulk send aapki taraf se send button tap nahi kar paayega."
         )
     }
 
     private fun buildOverlayHelp(): String {
         return localized(
             english = "Overlay permission is used for the floating campaign controls and live progress while your campaign is running.",
-            hindi = "Overlay permission floating campaign controls aur live progress dikhane ke liye use hoti hai jab aapka campaign chal raha hota hai."
+            hindi = "Overlay permission ki wajah se campaign chalte waqt floating controls aur live progress dikhte hain."
         )
     }
 
@@ -832,12 +1032,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         return if (pending.isEmpty()) {
             localized(
                 english = "Everything looks ready. Refresh once and use the launch card.",
-                hindi = "Sab ready dikh raha hai. Ek baar refresh karke launch card use karo."
+                hindi = "Sab kuch ready lag raha hai. Ek baar status refresh karke launch card use kar lo."
             )
         } else {
             localized(
                 english = "These items are still pending: ${pending.joinToString(", ")}. Use the buttons below, or type commands like 'open accessibility', 'open overlay', or 'allow notifications'.",
-                hindi = "Abhi yeh pending hai: ${pending.joinToString(", ")}. Neeche buttons use karo, ya 'open accessibility', 'open overlay', ya 'allow notifications' likho."
+                hindi = "Abhi yeh cheezein pending hain: ${pending.joinToString(", ")}. Neeche wale buttons use kar lo, ya 'open accessibility', 'open overlay' ya 'allow notifications' likh do."
             )
         }
     }
@@ -853,30 +1053,33 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             ChatMessage(
                 text = localized(
                     "Setup reset. Let us start again.",
-                    "Setup reset ho gaya. Chalo dobara start karte hain."
+                    "Setup reset ho gaya. Chalo phir se start karte hain."
                 ),
                 type = MessageType.TEXT_BOT
             )
         )
 
         if (_groups.value.isEmpty()) {
-            appendCardOnce(MessageType.CARD_ADD_CONTACT)
             _step.value = AgentStep.WAITING_FOR_CONTACTS
             addBotMessage(
                 english = "Create a group first by tapping Add Contact Now.",
-                hindi = "Add Contact Now tap karke pehle group banao."
+                hindi = "'Abhi Group Banao' tap karke pehle group banao.",
+                voiceRequest = contactAddHelpVoiceRequest()
             )
+            showCard(MessageType.CARD_ADD_CONTACT)
         } else {
-            appendCardOnce(MessageType.CHIPS_CONTACT_OPTIONS)
             _step.value = AgentStep.SELECT_CONTACT_SOURCE
             addBotMessage(
                 english = "Would you like to use an existing group or create a new one?",
-                hindi = "Purana group use karna hai ya naya banana hai?"
+                hindi = "Saved group use karna hai ya naya group banana hai?"
             )
+            showCard(MessageType.CHIPS_CONTACT_OPTIONS)
         }
     }
 
     private fun updateLanguagePreference(text: String) {
+        if (isLanguageManuallySelected) return
+
         val normalized = text.lowercase()
         val explicitEnglish = containsAny(
             normalized,
@@ -886,8 +1089,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             "language english",
             "use english"
         )
-        val explicitHindi = containsAny(
+        val explicitHinglish = containsAny(
             normalized,
+            "speak in hinglish",
+            "reply in hinglish",
+            "language hinglish",
+            "use hinglish",
+            "hinglish me",
+            "hinglish mein",
             "speak in hindi",
             "reply in hindi",
             "language hindi",
@@ -896,18 +1105,22 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             "use hindi"
         ) || containsHindiScript(text)
 
-        _language.value = when {
+        val detectedLanguage = when {
             explicitEnglish -> ChatLanguage.ENGLISH
-            explicitHindi -> ChatLanguage.HINDI
-            detectHindiIntent(text) -> ChatLanguage.HINDI
+            explicitHinglish -> ChatLanguage.HINGLISH
+            detectHinglishIntent(text) -> ChatLanguage.HINGLISH
             else -> _language.value
+        }
+
+        if (detectedLanguage != _language.value) {
+            updateLanguage(language = detectedLanguage, manualSelection = false)
         }
     }
 
-    private fun detectHindiIntent(text: String): Boolean {
+    private fun detectHinglishIntent(text: String): Boolean {
         val lowered = text.lowercase()
         val tokens = lowered.split(Regex("[^a-zA-Z]+")).filter { it.isNotBlank() }
-        val hindiWordSignals = setOf(
+        val hinglishWordSignals = setOf(
             "kya",
             "kaise",
             "karna",
@@ -931,7 +1144,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             "hogaya",
             "badal do"
         )
-        val wordScore = tokens.count { it in hindiWordSignals }
+        val wordScore = tokens.count { it in hinglishWordSignals }
         val phraseScore = hindiPhraseSignals.count { lowered.contains(it) }
         return wordScore + phraseScore >= 2
     }
@@ -948,6 +1161,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             containsAny(normalizedText, "text campaign", "text only", "only text") -> CampaignType.TEXT
             containsAny(normalizedText, "image", "video", "pdf") -> CampaignType.CAPTION
             containsAny(normalizedText, "text") -> CampaignType.TEXT
+            else -> null
+        }
+    }
+
+    private fun detectWhatsAppTargetFromText(normalizedText: String): WhatsAppTarget? {
+        return when {
+            containsAny(normalizedText, "whatsapp business", "business whatsapp", "wa business", "wa biz", "w4b") -> WhatsAppTarget.BUSINESS
+            containsAny(normalizedText, "whatsapp", "regular whatsapp", "normal whatsapp") -> WhatsAppTarget.WHATSAPP
             else -> null
         }
     }
@@ -1055,27 +1276,83 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _uiActions.tryEmit(action)
     }
 
-    private fun appendCardOnce(type: MessageType) {
-        if (_messages.value.any { it.type == type }) {
-            return
-        }
-        _messages.value = _messages.value + ChatMessage(type = type)
+    private fun showCard(type: MessageType) {
+        _messages.value = _messages.value
+            .filterNot { it.type == type } + ChatMessage(type = type)
     }
 
-    private fun addBotMessage(text: String) {
-        _messages.value = _messages.value + ChatMessage(text = text, type = MessageType.TEXT_BOT)
+    private fun addBotMessage(text: String, voiceRequest: ChatVoiceRequest? = buildTextVoiceRequest(text)) {
+        _messages.value = _messages.value + ChatMessage(
+            text = text,
+            type = MessageType.TEXT_BOT,
+            voiceRequest = voiceRequest
+        )
     }
 
-    private fun addBotMessage(english: String, hindi: String) {
-        addBotMessage(localized(english, hindi))
+    private fun addBotMessage(
+        english: String,
+        hindi: String,
+        voiceRequest: ChatVoiceRequest? = null
+    ) {
+        val text = localized(english, hindi)
+        addBotMessage(text, voiceRequest ?: buildTextVoiceRequest(text))
     }
 
     private fun addUserMessage(text: String) {
         _messages.value = _messages.value + ChatMessage(text = text, type = MessageType.TEXT_USER)
     }
 
+    fun requestVoicePlayback(message: ChatMessage, forceRefresh: Boolean = false) {
+        val voiceRequest = message.voiceRequest ?: return
+        emitUiAction(AgentUiAction.PlayVoice(message.id, voiceRequest, forceRefresh))
+    }
+
     private fun localized(english: String, hindi: String): String {
-        return if (_language.value == ChatLanguage.HINDI) hindi else english
+        return AgentLanguageText.resolve(_language.value, english, hindi)
+    }
+
+    private fun buildTextVoiceRequest(
+        text: String,
+        language: ChatLanguage = _language.value
+    ): ChatVoiceRequest? {
+        val normalizedText = text.trim()
+        if (normalizedText.isBlank()) return null
+
+        return ChatVoiceRequest(
+            language = language,
+            text = normalizedText,
+            speechStyle = if (language == ChatLanguage.HINGLISH) {
+                "Warm natural Hinglish onboarding tone"
+            } else {
+                "Warm natural English onboarding tone"
+            }
+        )
+    }
+
+    private fun contactAddHelpVoiceRequest(): ChatVoiceRequest {
+        return ChatVoiceRequest(
+            language = _language.value,
+            templateKey = AiAgentVoiceTemplateKeys.CONTACT_ADD_HELP,
+            templateData = mapOf(
+                "appName" to "BulkSend",
+                "contactButtonLabel" to localized("Add Contact Now", "Abhi Group Banao"),
+                "returnChatLabel" to localized("come back to chat", "chat me wapas aao")
+            ),
+            speechStyle = if (_language.value == ChatLanguage.HINGLISH) {
+                "Friendly step by step Hinglish help"
+            } else {
+                "Friendly step by step English help"
+            }
+        )
+    }
+
+    private fun updateLanguage(language: ChatLanguage, manualSelection: Boolean) {
+        _language.value = language
+        isLanguageManuallySelected = manualSelection
+        languagePrefs.edit()
+            .putString(KEY_LANGUAGE, language.name)
+            .putBoolean(KEY_LANGUAGE_MANUAL, manualSelection)
+            .apply()
     }
 
     private fun resolveFileName(uri: Uri): String? {
@@ -1087,5 +1364,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 null
             }
         }
+    }
+
+    companion object {
+        private const val LANGUAGE_PREFS_NAME = "bulksender_ai_agent_prefs"
+        private const val KEY_LANGUAGE = "selected_language"
+        private const val KEY_LANGUAGE_MANUAL = "selected_language_manual"
     }
 }

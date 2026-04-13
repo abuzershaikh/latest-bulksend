@@ -1,3 +1,13 @@
+import {
+  handleManagerAccess,
+  handleManagerActivate,
+  handleManagerAffiliate,
+  handleManagerCustomers,
+  handleManagerSearch,
+  handleManagerWalletOrder,
+  handleManagerWalletVerify
+} from "./manager-endpoints.js";
+
 var __defProp = Object.defineProperty;
 var __name = (target, value) => __defProp(target, "name", { value, configurable: true });
 
@@ -2005,6 +2015,52 @@ var FirestoreClient = class {
     const payload = await response.json();
     return Array.isArray(payload.documents) ? payload.documents.map(fromFirestoreDocument) : [];
   }
+  async queryCollection(collectionId, options = {}) {
+    const token = await this.getAccessToken();
+    const structuredQuery = {
+      from: [
+        {
+          collectionId
+        }
+      ]
+    };
+    if (Array.isArray(options.filters) && options.filters.length === 1) {
+      structuredQuery.where = buildFirestoreFieldFilter(options.filters[0]);
+    } else if (Array.isArray(options.filters) && options.filters.length > 1) {
+      structuredQuery.where = {
+        compositeFilter: {
+          op: "AND",
+          filters: options.filters.map(buildFirestoreFieldFilter)
+        }
+      };
+    }
+    if (Array.isArray(options.orderBy) && options.orderBy.length > 0) {
+      structuredQuery.orderBy = options.orderBy.map((item) => ({
+        field: {
+          fieldPath: item.fieldPath
+        },
+        direction: item.direction || "ASCENDING"
+      }));
+    }
+    if (typeof options.limit === "number" && Number.isFinite(options.limit) && options.limit > 0) {
+      structuredQuery.limit = Math.floor(options.limit);
+    }
+    const response = await fetch(`${this.baseUrl}:runQuery`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        structuredQuery
+      })
+    });
+    if (!response.ok) {
+      throw new Error(`Firestore query failed for ${collectionId}: ${await response.text()}`);
+    }
+    const payload = await response.json();
+    return Array.isArray(payload) ? payload.filter((item) => item.document).map((item) => fromFirestoreDocument(item.document)) : [];
+  }
   async getAccessToken() {
     const now = Date.now();
     if (cachedToken && now < cachedTokenExpiry) {
@@ -2081,6 +2137,7 @@ function toFirestoreFields(data) {
 __name(toFirestoreFields, "toFirestoreFields");
 function toFirestoreValue(value) {
   if (value === null || value === void 0) return { nullValue: null };
+  if (value instanceof Date) return { timestampValue: value.toISOString() };
   if (typeof value === "string") return { stringValue: value };
   if (typeof value === "boolean") return { booleanValue: value };
   if (typeof value === "number") {
@@ -2106,6 +2163,18 @@ function toFirestoreValue(value) {
   return { stringValue: String(value) };
 }
 __name(toFirestoreValue, "toFirestoreValue");
+function buildFirestoreFieldFilter(filter) {
+  return {
+    fieldFilter: {
+      field: {
+        fieldPath: filter.fieldPath
+      },
+      op: filter.op || "EQUAL",
+      value: toFirestoreValue(filter.value)
+    }
+  };
+}
+__name(buildFirestoreFieldFilter, "buildFirestoreFieldFilter");
 
 // src/index.js
 var FIREBASE_JWKS = createRemoteJWKSet(
@@ -2130,6 +2199,89 @@ var index_default = {
           worker: "refer-earn-worker",
           status: "running"
         });
+      }
+      if (request.method === "GET" && url.pathname === "/health/firestore-auth") {
+        try {
+          const token = await firestore.getAccessToken();
+          return json({
+            success: true,
+            worker: "refer-earn-worker",
+            firestoreAuth: "ok",
+            tokenPreview: token.slice(0, 12)
+          });
+        } catch (error) {
+          return json({
+            success: false,
+            worker: "refer-earn-worker",
+            firestoreAuth: "failed",
+            error: error instanceof Error ? error.message : String(error)
+          }, 500);
+        }
+      }
+      if (request.method === "GET" && url.pathname === "/health/firestore-read") {
+        try {
+          const doc = await firestore.getDocument("__health__/ping");
+          return json({
+            success: true,
+            worker: "refer-earn-worker",
+            firestoreRead: "ok",
+            exists: Boolean(doc)
+          });
+        } catch (error) {
+          return json({
+            success: false,
+            worker: "refer-earn-worker",
+            firestoreRead: "failed",
+            error: error instanceof Error ? error.message : String(error)
+          }, 500);
+        }
+      }
+      if (request.method === "GET" && url.pathname === "/health/manager-lookup") {
+        const email = (url.searchParams.get("email") || "").trim().toLowerCase();
+        if (!email) {
+          return json({
+            success: false,
+            error: "email is required"
+          }, 400);
+        }
+        try {
+          const directDoc = await firestore.getDocument(`affiliateManagers/${email}`);
+          let queryDoc = null;
+          try {
+            const matches = await firestore.queryCollection("affiliateManagers", {
+              filters: [
+                {
+                  fieldPath: "email",
+                  op: "EQUAL",
+                  value: email
+                }
+              ],
+              limit: 1
+            });
+            queryDoc = matches[0] || null;
+          } catch (queryError) {
+            queryDoc = {
+              error: queryError instanceof Error ? queryError.message : String(queryError)
+            };
+          }
+          return json({
+            success: true,
+            email,
+            directExists: Boolean(directDoc),
+            directEnabled: directDoc?.enabled ?? null,
+            directName: directDoc?.name || null,
+            queryExists: Boolean(queryDoc && !queryDoc.error),
+            queryEnabled: queryDoc?.enabled ?? null,
+            queryName: queryDoc?.name || null,
+            queryError: queryDoc?.error || null
+          });
+        } catch (error) {
+          return json({
+            success: false,
+            email,
+            error: error instanceof Error ? error.message : String(error)
+          }, 500);
+        }
       }
       const redirectMatch = url.pathname.match(/^\/r\/([A-Z0-9_-]+)$/i);
       if (request.method === "GET" && redirectMatch) {
@@ -2176,9 +2328,50 @@ var index_default = {
         const auth = await authenticateRequest(request, env);
         return handleReferredUsers({ firestore, auth });
       }
+      if (request.method === "GET" && url.pathname === "/api/manager/access") {
+        const auth = await authenticateRequest(request, env);
+        return handleManagerAccess({ firestore, auth, json, HttpError });
+      }
+      if (request.method === "GET" && url.pathname === "/api/manager/search") {
+        const auth = await authenticateRequest(request, env);
+        return handleManagerSearch({ request, firestore, auth, json, HttpError });
+      }
+      if (request.method === "GET" && url.pathname === "/api/manager/customers") {
+        const auth = await authenticateRequest(request, env);
+        return handleManagerCustomers({ firestore, auth, json, HttpError });
+      }
+      if (request.method === "GET" && url.pathname === "/api/manager/affiliate") {
+        const auth = await authenticateRequest(request, env);
+        return handleManagerAffiliate({
+          request,
+          env,
+          firestore,
+          auth,
+          json,
+          HttpError,
+          buildReferralLink,
+          sanitizeReferralCode,
+          generateUniqueReferralCode,
+          pickFirstNonEmpty,
+          toInt
+        });
+      }
+      if (request.method === "POST" && url.pathname === "/api/manager/wallet/order") {
+        const auth = await authenticateRequest(request, env);
+        return handleManagerWalletOrder({ request, env, firestore, auth, parseBody, json, HttpError });
+      }
+      if (request.method === "POST" && url.pathname === "/api/manager/wallet/verify") {
+        const auth = await authenticateRequest(request, env);
+        return handleManagerWalletVerify({ request, env, firestore, auth, parseBody, json, HttpError });
+      }
+      if (request.method === "POST" && url.pathname === "/api/manager/activate") {
+        const auth = await authenticateRequest(request, env);
+        return handleManagerActivate({ request, firestore, auth, parseBody, json, HttpError });
+      }
       return json({ success: false, error: "Not found" }, 404);
     } catch (error) {
-      console.error("Affiliate worker error:", error);
+      const errorMessage = error instanceof Error ? error.stack || error.message : String(error);
+      console.error("Affiliate worker error:", errorMessage);
       return json({
         success: false,
         error: error instanceof HttpError ? error.message : "Internal server error",
@@ -2279,12 +2472,11 @@ async function handleTrackAnonymousInstall({ request, firestore }) {
   }
   const installPath = buildInstallPath(installId);
   const now = (/* @__PURE__ */ new Date()).toISOString();
-  const referrerPath = buildUserPath(codeDoc.referrerUserId);
-  const referrerDoc = await firestore.getDocument(referrerPath) || {};
+  const owner = await getReferralOwnerContext(firestore, codeDoc);
   const created = await firestore.createDocumentIfMissing(installPath, {
     installId,
     referralCode,
-    referrerUserId: codeDoc.referrerUserId,
+    ...buildOwnerScopedInstallPayload(owner),
     installSource,
     installTrackedAt: now,
     createdAt: now,
@@ -2299,9 +2491,10 @@ async function handleTrackAnonymousInstall({ request, firestore }) {
       message: "Affiliate install already tracked"
     });
   }
-  await firestore.setDocument(referrerPath, {
-    trackedInstalls: toInt(referrerDoc.trackedInstalls) + 1,
-    updatedAt: now
+  await firestore.setDocument(owner.path, {
+    trackedInstalls: toInt(owner.doc.trackedInstalls) + 1,
+    updatedAt: now,
+    ...(owner.ownerType === "manager" ? { affiliateUpdatedAt: now } : {})
   }, { merge: true });
   return json({
     success: true,
@@ -2324,18 +2517,25 @@ async function handleTrackInstall({ request, firestore, auth }) {
   if (!codeDoc || codeDoc.active === false) {
     throw new HttpError(404, "Affiliate code not found");
   }
-  if (codeDoc.referrerUserId === auth.uid) {
+  const owner = await getReferralOwnerContext(firestore, codeDoc);
+  if (owner.ownerType === "user" && owner.referrerUserId === auth.uid) {
     throw new HttpError(400, "You cannot use your own referral code");
   }
-  if (anonymousInstall?.referrerUserId && anonymousInstall.referrerUserId !== codeDoc.referrerUserId) {
+  if (owner.ownerType === "manager" && normalizeManagerEmail(auth.email) === owner.managerEmail) {
+    throw new HttpError(400, "You cannot use your own referral code");
+  }
+  const anonymousOwnerKey = getStoredReferralOwnerKey(anonymousInstall);
+  if (anonymousOwnerKey && anonymousOwnerKey !== owner.ownerKey) {
     throw new HttpError(409, "Install is already linked to another referrer");
   }
   const now = (/* @__PURE__ */ new Date()).toISOString();
   const userPath = buildUserPath(auth.uid);
   const currentUser = await firestore.getDocument(userPath) || {};
-  const referrerPath = buildUserPath(codeDoc.referrerUserId);
-  const referrerDoc = await firestore.getDocument(referrerPath) || {};
-  const referredUserPath = `${referrerPath}/referredUsers/${auth.uid}`;
+  const currentOwnerKey = getStoredReferralOwnerKey(currentUser);
+  if (currentOwnerKey && currentOwnerKey !== owner.ownerKey) {
+    throw new HttpError(409, "Referral code already linked to another referrer");
+  }
+  const referredUserPath = buildReferralUserPath(owner, auth.uid);
   const existingReferredUser = await firestore.getDocument(referredUserPath);
   const referredAt = existingReferredUser?.referredAt || now;
   let effectiveInstallTrackedAt = existingReferredUser?.installTrackedAt || anonymousInstall?.installTrackedAt || now;
@@ -2346,7 +2546,7 @@ async function handleTrackInstall({ request, firestore, auth }) {
     const createdInstall = await firestore.createDocumentIfMissing(buildInstallPath(installId), {
       installId,
       referralCode,
-      referrerUserId: codeDoc.referrerUserId,
+      ...buildOwnerScopedInstallPayload(owner),
       installSource,
       installTrackedAt: now,
       linkedUserId: auth.uid,
@@ -2365,7 +2565,11 @@ async function handleTrackInstall({ request, firestore, auth }) {
   await firestore.setDocument(userPath, {
     userId: auth.uid,
     installReferralCode: referralCode,
-    referrerUserId: codeDoc.referrerUserId,
+    referralOwnerType: owner.ownerType,
+    referralOwnerKey: owner.ownerKey,
+    referrerUserId: owner.referrerUserId || null,
+    managerReferralEmail: owner.managerEmail || null,
+    managerReferralName: owner.displayName || owner.managerName || null,
     referralInstallTrackedAt: effectiveInstallTrackedAt,
     installSource,
     affiliateInstallId: effectiveInstallId,
@@ -2378,10 +2582,14 @@ async function handleTrackInstall({ request, firestore, auth }) {
     email: currentUser.email || auth.email || "N/A",
     phoneNumber: currentUser.phoneNumber || "N/A",
     userStatus: nextStatus,
+    referralOwnerType: owner.ownerType,
+    referralOwnerKey: owner.ownerKey,
     referredAt,
     installTrackedAt: effectiveInstallTrackedAt,
     installSource,
     affiliateInstallId: effectiveInstallId,
+    managerEmail: owner.managerEmail || null,
+    managerName: owner.displayName || owner.managerName || null,
     hasPurchased: Boolean(existingReferredUser?.hasPurchased),
     purchasedPlanType: existingReferredUser?.purchasedPlanType || null,
     purchaseAmount: toInt(existingReferredUser?.purchaseAmount),
@@ -2391,15 +2599,16 @@ async function handleTrackInstall({ request, firestore, auth }) {
     lastUpdatedAt: now
   }, { merge: true });
   const referrerUpdates = {
-    updatedAt: now
+    updatedAt: now,
+    ...(owner.ownerType === "manager" ? { affiliateUpdatedAt: now } : {})
   };
   if (!existingReferredUser) {
-    referrerUpdates.referralCount = toInt(referrerDoc.referralCount) + 1;
+    referrerUpdates.referralCount = toInt(owner.doc.referralCount) + 1;
   }
   if (!alreadyTrackedInstall) {
-    referrerUpdates.trackedInstalls = toInt(referrerDoc.trackedInstalls) + 1;
+    referrerUpdates.trackedInstalls = toInt(owner.doc.trackedInstalls) + 1;
   }
-  await firestore.setDocument(referrerPath, referrerUpdates, { merge: true });
+  await firestore.setDocument(owner.path, referrerUpdates, { merge: true });
   if (installId && (!anonymousInstall || !anonymousInstall.linkedUserId || anonymousInstall.linkedUserId === auth.uid)) {
     await firestore.setDocument(buildInstallPath(installId), {
       linkedUserId: auth.uid,
@@ -2410,7 +2619,7 @@ async function handleTrackInstall({ request, firestore, auth }) {
   return json({
     success: true,
     message: "Affiliate install tracked successfully",
-    referrerName: codeDoc.referrerName || referrerDoc.fullName || null
+    referrerName: owner.displayName || null
   });
 }
 __name(handleTrackInstall, "handleTrackInstall");
@@ -2426,20 +2635,24 @@ async function handleClaimReferral({ request, firestore, auth }) {
   if (!codeDoc || codeDoc.active === false) {
     throw new HttpError(404, "Affiliate code not found");
   }
-  if (codeDoc.referrerUserId === auth.uid) {
+  const owner = await getReferralOwnerContext(firestore, codeDoc);
+  if (owner.ownerType === "user" && owner.referrerUserId === auth.uid) {
     throw new HttpError(400, "You cannot use your own referral code");
   }
-  if (anonymousInstall?.referrerUserId && anonymousInstall.referrerUserId !== codeDoc.referrerUserId) {
+  if (owner.ownerType === "manager" && normalizeManagerEmail(auth.email) === owner.managerEmail) {
+    throw new HttpError(400, "You cannot use your own referral code");
+  }
+  const anonymousOwnerKey = getStoredReferralOwnerKey(anonymousInstall);
+  if (anonymousOwnerKey && anonymousOwnerKey !== owner.ownerKey) {
     throw new HttpError(409, "Install is already linked to another referrer");
   }
   const userPath = buildUserPath(auth.uid);
   const currentUser = await firestore.getDocument(userPath) || {};
-  if (currentUser.referrerUserId && currentUser.referrerUserId !== codeDoc.referrerUserId) {
+  const currentOwnerKey = getStoredReferralOwnerKey(currentUser);
+  if (currentOwnerKey && currentOwnerKey !== owner.ownerKey) {
     throw new HttpError(409, "Referral code already linked to another referrer");
   }
-  const referrerPath = buildUserPath(codeDoc.referrerUserId);
-  const referrerDoc = await firestore.getDocument(referrerPath) || {};
-  const referredUserPath = `${referrerPath}/referredUsers/${auth.uid}`;
+  const referredUserPath = buildReferralUserPath(owner, auth.uid);
   const existingReferredUser = await firestore.getDocument(referredUserPath);
   const isNewReferral = !existingReferredUser;
   const now = (/* @__PURE__ */ new Date()).toISOString();
@@ -2454,7 +2667,11 @@ async function handleClaimReferral({ request, firestore, auth }) {
     fullName: currentUser.fullName || auth.name || "",
     email: currentUser.email || auth.email || "",
     referredBy: referralCode,
-    referrerUserId: codeDoc.referrerUserId,
+    referralOwnerType: owner.ownerType,
+    referralOwnerKey: owner.ownerKey,
+    referrerUserId: owner.referrerUserId || null,
+    managerReferralEmail: owner.managerEmail || null,
+    managerReferralName: owner.displayName || owner.managerName || null,
     referredAt,
     registeredAt: existingReferredUser?.registeredAt || now,
     installReferralCode: currentUser.installReferralCode || referralCode,
@@ -2470,10 +2687,14 @@ async function handleClaimReferral({ request, firestore, auth }) {
     email: currentUser.email || auth.email || "N/A",
     phoneNumber: currentUser.phoneNumber || "N/A",
     userStatus,
+    referralOwnerType: owner.ownerType,
+    referralOwnerKey: owner.ownerKey,
     referredAt,
     installTrackedAt: effectiveInstallTrackedAt,
     installSource: effectiveInstallSource,
     affiliateInstallId: effectiveInstallId,
+    managerEmail: owner.managerEmail || null,
+    managerName: owner.displayName || owner.managerName || null,
     registeredAt: existingReferredUser?.registeredAt || now,
     hasPurchased: Boolean(existingReferredUser?.hasPurchased),
     purchasedPlanType: existingReferredUser?.purchasedPlanType || null,
@@ -2483,15 +2704,16 @@ async function handleClaimReferral({ request, firestore, auth }) {
     lastUpdatedAt: now
   }, { merge: true });
   const referrerUpdates = {
-    updatedAt: now
+    updatedAt: now,
+    ...(owner.ownerType === "manager" ? { affiliateUpdatedAt: now } : {})
   };
   if (isNewReferral) {
-    referrerUpdates.referralCount = toInt(referrerDoc.referralCount) + 1;
+    referrerUpdates.referralCount = toInt(owner.doc.referralCount) + 1;
   }
   if (!wasRegistered) {
-    referrerUpdates.trackedRegistrations = toInt(referrerDoc.trackedRegistrations) + 1;
+    referrerUpdates.trackedRegistrations = toInt(owner.doc.trackedRegistrations) + 1;
   }
-  await firestore.setDocument(referrerPath, referrerUpdates, { merge: true });
+  await firestore.setDocument(owner.path, referrerUpdates, { merge: true });
   if (installId && (!anonymousInstall || !anonymousInstall.linkedUserId || anonymousInstall.linkedUserId === auth.uid)) {
     await firestore.setDocument(buildInstallPath(installId), {
       linkedUserId: auth.uid,
@@ -2502,7 +2724,7 @@ async function handleClaimReferral({ request, firestore, auth }) {
   return json({
     success: true,
     message: "Affiliate signup tracked successfully",
-    referrerName: codeDoc.referrerName || referrerDoc.fullName || null
+    referrerName: owner.displayName || null
   });
 }
 __name(handleClaimReferral, "handleClaimReferral");
@@ -2518,14 +2740,16 @@ async function handleRewardReferral({ request, env, firestore, auth }) {
   if (!buyerDoc) {
     throw new HttpError(404, "Buyer userDetails document not found");
   }
-  const referrerUserId = buyerDoc.referrerUserId || null;
-  if (!referrerUserId) {
+  const referralOwnerType = getStoredReferralOwnerType(buyerDoc);
+  const referralOwnerKey = getStoredReferralOwnerKey(buyerDoc);
+  if (!referralOwnerType || !referralOwnerKey) {
     return json({
       success: false,
       message: "No referrer linked for this user"
     });
   }
-  const referredUserPath = `${buildUserPath(referrerUserId)}/referredUsers/${auth.uid}`;
+  const ownerPath = referralOwnerType === "manager" ? buildManagerPath(referralOwnerKey) : buildUserPath(referralOwnerKey);
+  const referredUserPath = `${ownerPath}/referredUsers/${auth.uid}`;
   const referredUserDoc = await firestore.getDocument(referredUserPath);
   if (!referredUserDoc) {
     return json({
@@ -2543,8 +2767,7 @@ async function handleRewardReferral({ request, env, firestore, auth }) {
   const commissionRate = resolveCommissionRate(env.REFERRAL_COMMISSION_RATE);
   const commission = Math.round(purchaseAmount * commissionRate / 100);
   const now = (/* @__PURE__ */ new Date()).toISOString();
-  const referrerPath = buildUserPath(referrerUserId);
-  const referrerDoc = await firestore.getDocument(referrerPath) || {};
+  const referrerDoc = await firestore.getDocument(ownerPath) || {};
   await firestore.setDocument(referredUserPath, {
     oderId: auth.uid,
     referredUserId: auth.uid,
@@ -2568,11 +2791,12 @@ async function handleRewardReferral({ request, env, firestore, auth }) {
     lastReferralRewardProcessedAt: now,
     updatedAt: now
   }, { merge: true });
-  await firestore.setDocument(referrerPath, {
+  await firestore.setDocument(ownerPath, {
     successfulReferrals: toInt(referrerDoc.successfulReferrals) + 1,
     totalReferralEarnings: toInt(referrerDoc.totalReferralEarnings) + commission,
     pendingEarnings: toInt(referrerDoc.pendingEarnings) + commission,
-    updatedAt: now
+    updatedAt: now,
+    ...(referralOwnerType === "manager" ? { affiliateUpdatedAt: now } : {})
   }, { merge: true });
   return json({
     success: true,
@@ -2741,20 +2965,25 @@ async function handleReferralRedirect({ referralCode, request, env, ctx, firesto
     throw new HttpError(400, "Invalid referral code");
   }
   const codeDoc = await firestore.getDocument(`referralCodes/${normalizedCode}`);
-  if (codeDoc?.referrerUserId) {
-    const referrerPath = buildUserPath(codeDoc.referrerUserId);
-    const referrerDoc = await firestore.getDocument(referrerPath) || {};
+  if (codeDoc) {
+    const owner = await getReferralOwnerContext(firestore, codeDoc);
     const now = (/* @__PURE__ */ new Date()).toISOString();
     try {
       await Promise.all([
-        firestore.setDocument(referrerPath, {
-          referralLinkClicks: toInt(referrerDoc.referralLinkClicks) + 1,
-          updatedAt: now
+        firestore.setDocument(owner.path, {
+          referralLinkClicks: toInt(owner.doc.referralLinkClicks) + 1,
+          updatedAt: now,
+          ...(owner.ownerType === "manager" ? { affiliateUpdatedAt: now } : {})
         }, { merge: true }),
-        firestore.setDocument(`${referrerPath}/referralClicks/${crypto.randomUUID()}`, {
+        firestore.setDocument(`${owner.path}/referralClicks/${crypto.randomUUID()}`, {
           referralCode: normalizedCode,
           clickedAt: now,
-          userAgent: request.headers.get("user-agent") || ""
+          userAgent: request.headers.get("user-agent") || "",
+          referralOwnerType: owner.ownerType,
+          referralOwnerKey: owner.ownerKey,
+          managerEmail: owner.managerEmail || "",
+          managerName: owner.displayName || owner.managerName || "",
+          referrerUserId: owner.referrerUserId || ""
         }, { merge: true })
       ]);
     } catch (error) {
@@ -2874,6 +3103,129 @@ function buildUserPath(userId) {
   return `userDetails/${userId}`;
 }
 __name(buildUserPath, "buildUserPath");
+function normalizeManagerEmail(value) {
+  return pickFirstNonEmpty(value).toLowerCase();
+}
+__name(normalizeManagerEmail, "normalizeManagerEmail");
+function buildManagerPath(managerEmail) {
+  const normalizedEmail = normalizeManagerEmail(managerEmail);
+  return normalizedEmail ? `affiliateManagers/${normalizedEmail}` : "";
+}
+__name(buildManagerPath, "buildManagerPath");
+function getStoredManagerReferralEmail(document) {
+  return normalizeManagerEmail(
+    document?.managerEmail ||
+    document?.managerReferralEmail ||
+    document?.referredByManagerEmail
+  );
+}
+__name(getStoredManagerReferralEmail, "getStoredManagerReferralEmail");
+function getStoredReferralOwnerType(document) {
+  const explicitType = pickFirstNonEmpty(
+    document?.referralOwnerType,
+    document?.ownerType
+  ).toLowerCase();
+  if (explicitType === "manager" || explicitType === "user") {
+    return explicitType;
+  }
+  if (getStoredManagerReferralEmail(document) && !pickFirstNonEmpty(document?.referrerUserId)) {
+    return "manager";
+  }
+  if (pickFirstNonEmpty(document?.referrerUserId)) {
+    return "user";
+  }
+  return "";
+}
+__name(getStoredReferralOwnerType, "getStoredReferralOwnerType");
+function getStoredReferralOwnerKey(document) {
+  const explicitKey = pickFirstNonEmpty(document?.referralOwnerKey);
+  if (explicitKey) {
+    return explicitKey;
+  }
+  const ownerType = getStoredReferralOwnerType(document);
+  if (ownerType === "manager") {
+    return getStoredManagerReferralEmail(document);
+  }
+  if (ownerType === "user") {
+    return pickFirstNonEmpty(document?.referrerUserId);
+  }
+  return "";
+}
+__name(getStoredReferralOwnerKey, "getStoredReferralOwnerKey");
+function resolveCodeOwner(codeDoc) {
+  const ownerType = codeDoc?.ownerType === "manager" || (!codeDoc?.referrerUserId && normalizeManagerEmail(codeDoc?.managerEmail || codeDoc?.referrerEmail)) ? "manager" : "user";
+  if (ownerType === "manager") {
+    const managerEmail = normalizeManagerEmail(codeDoc?.managerEmail || codeDoc?.referrerEmail);
+    return {
+      ownerType,
+      ownerKey: managerEmail,
+      referrerUserId: "",
+      managerEmail,
+      managerName: pickFirstNonEmpty(codeDoc?.managerName, codeDoc?.referrerName, managerEmail.split("@")[0]),
+      managerUid: pickFirstNonEmpty(codeDoc?.managerUid),
+      referrerName: pickFirstNonEmpty(codeDoc?.managerName, codeDoc?.referrerName),
+      referrerEmail: managerEmail
+    };
+  }
+  return {
+    ownerType: "user",
+    ownerKey: pickFirstNonEmpty(codeDoc?.referrerUserId),
+    referrerUserId: pickFirstNonEmpty(codeDoc?.referrerUserId),
+    managerEmail: "",
+    managerName: "",
+    managerUid: "",
+    referrerName: pickFirstNonEmpty(codeDoc?.referrerName),
+    referrerEmail: pickFirstNonEmpty(codeDoc?.referrerEmail)
+  };
+}
+__name(resolveCodeOwner, "resolveCodeOwner");
+async function getReferralOwnerContext(firestore, codeDoc) {
+  const owner = resolveCodeOwner(codeDoc);
+  if (owner.ownerType === "manager") {
+    if (!owner.managerEmail) {
+      throw new HttpError(500, "Affiliate code is missing manager ownership metadata");
+    }
+    const path = buildManagerPath(owner.managerEmail);
+    const doc = await firestore.getDocument(path) || {};
+    return {
+      ...owner,
+      path,
+      doc,
+      displayName: pickFirstNonEmpty(owner.managerName, doc.name, owner.managerEmail.split("@")[0], owner.managerEmail),
+      displayEmail: owner.managerEmail
+    };
+  }
+  if (!owner.referrerUserId) {
+    throw new HttpError(500, "Affiliate code is missing referrer ownership metadata");
+  }
+  const path = buildUserPath(owner.referrerUserId);
+  const doc = await firestore.getDocument(path) || {};
+  return {
+    ...owner,
+    path,
+    doc,
+    displayName: pickFirstNonEmpty(owner.referrerName, doc.fullName, doc.email, owner.referrerEmail, owner.referrerUserId),
+    displayEmail: pickFirstNonEmpty(doc.email, owner.referrerEmail)
+  };
+}
+__name(getReferralOwnerContext, "getReferralOwnerContext");
+function buildReferralUserPath(owner, referredUserId) {
+  return `${owner.path}/referredUsers/${referredUserId}`;
+}
+__name(buildReferralUserPath, "buildReferralUserPath");
+function buildOwnerScopedInstallPayload(owner) {
+  return {
+    referralOwnerType: owner.ownerType,
+    referralOwnerKey: owner.ownerKey,
+    referrerUserId: owner.referrerUserId || "",
+    managerEmail: owner.managerEmail || "",
+    managerName: owner.displayName || owner.managerName || "",
+    managerUid: owner.managerUid || "",
+    referrerName: owner.displayName || owner.referrerName || "",
+    referrerEmail: owner.displayEmail || owner.referrerEmail || ""
+  };
+}
+__name(buildOwnerScopedInstallPayload, "buildOwnerScopedInstallPayload");
 function getExistingReferralCode(userDoc) {
   return sanitizeReferralCode(
     pickFirstNonEmpty(

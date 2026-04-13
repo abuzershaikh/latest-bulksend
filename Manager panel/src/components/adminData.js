@@ -3,9 +3,22 @@ import { getPlanLabel, isKnownPlan } from './planConfig';
 export const tabs = [
     { id: 'search', label: 'Search' },
     { id: 'customers', label: 'My Customers' },
+    { id: 'affiliate', label: 'Affiliate' },
+    {
+        id: 'desktop-activation',
+        label: 'Desktop Activation',
+        href: 'https://www.openleadsai.com/reseller-access',
+        external: true,
+    },
 ];
 
 const numberFormatter = new Intl.NumberFormat('en-IN');
+const currencyFormatter = new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: 'INR',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+});
 const dateFormatter = new Intl.DateTimeFormat('en-IN', {
     day: '2-digit',
     month: 'short',
@@ -22,6 +35,10 @@ const dateTimeFormatter = new Intl.DateTimeFormat('en-IN', {
 export function toMillis(value) {
     if (!value) return null;
     if (typeof value === 'number') return value;
+    if (typeof value === 'string') {
+        const parsed = Date.parse(value);
+        return Number.isNaN(parsed) ? null : parsed;
+    }
     if (value instanceof Date) return value.getTime();
     if (typeof value.toMillis === 'function') return value.toMillis();
     if (typeof value.seconds === 'number') return value.seconds * 1000;
@@ -38,6 +55,16 @@ export function formatCount(value) {
     if (value === undefined || value === null || value === '') return '-';
     if (Number(value) >= 999999) return 'Unlimited';
     return numberFormatter.format(Number(value));
+}
+
+export function formatCurrency(value) {
+    const amount = Number(value);
+    if (!Number.isFinite(amount)) return currencyFormatter.format(0);
+    return currencyFormatter.format(amount);
+}
+
+export function formatCurrencyFromPaise(value) {
+    return formatCurrency((Number(value) || 0) / 100);
 }
 
 export function cleanText(value) {
@@ -180,6 +207,14 @@ function normalizeUser(key, record) {
         managerEmail: normalizeEmail(data.managerEmail),
         managerUid: cleanText(data.managerUid),
         managerActivatedMillis: toMillis(data.managerActivatedAt),
+        managerActivationEventId: cleanText(data.managerActivationEventId),
+        customerPaymentReceived: data.customerPaymentReceived === true,
+        customerPaymentReceivedMillis: toMillis(data.customerPaymentReceivedAt),
+        adminReceiptStatus: cleanText(data.adminReceiptStatus),
+        adminPaymentReceived: data.adminPaymentReceived === true,
+        adminPaymentReceivedMillis: toMillis(data.adminPaymentReceivedAt),
+        adminPaymentReceivedByName: cleanText(data.adminPaymentReceivedByName),
+        adminPaymentReceivedByEmail: cleanText(data.adminPaymentReceivedByEmail),
         sourceCollections: [
             record.emailData ? 'email_data' : '',
             record.detailData ? 'userDetails' : '',

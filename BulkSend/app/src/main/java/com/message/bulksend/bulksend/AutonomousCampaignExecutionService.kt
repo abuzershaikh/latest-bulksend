@@ -6,6 +6,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.ClipData
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -14,6 +15,7 @@ import android.os.IBinder
 import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.content.FileProvider
 import com.message.bulksend.R
 import com.message.bulksend.bulksend.textcamp.computeNextRetryPlan
 import com.message.bulksend.db.AppDatabase
@@ -28,6 +30,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 import java.net.URLEncoder
 import java.util.Collections
 import kotlin.math.abs
@@ -245,17 +248,27 @@ class AutonomousCampaignExecutionService : Service() {
                 queueEntry.contactName,
                 ignoreCase = true
             )
-            val encodedMessage = URLEncoder.encode(personalizedMessage, "UTF-8")
-            val waIntent = Intent(
-                Intent.ACTION_VIEW,
-                Uri.parse("https://wa.me/$cleanNumber?text=$encodedMessage")
-            ).apply {
-                setPackage(targetPackage)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
 
             withContext(Dispatchers.Main) {
-                startActivity(waIntent)
+                if (campaign.mediaPath.isNullOrBlank()) {
+                    val encodedMessage = URLEncoder.encode(personalizedMessage, "UTF-8")
+                    startActivity(
+                        Intent(
+                            Intent.ACTION_VIEW,
+                            Uri.parse("https://wa.me/$cleanNumber?text=$encodedMessage")
+                        ).apply {
+                            setPackage(targetPackage)
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                    )
+                } else {
+                    launchTextAndMediaFlow(
+                        cleanNumber = cleanNumber,
+                        message = personalizedMessage,
+                        mediaPath = campaign.mediaPath,
+                        targetPackage = targetPackage
+                    )
+                }
             }
 
             val confirmationReceived = waitForSendConfirmation()
@@ -398,6 +411,98 @@ class AutonomousCampaignExecutionService : Service() {
         }
     }
 
+    private suspend fun launchTextAndMediaFlow(
+        cleanNumber: String,
+        message: String,
+        mediaPath: String,
+        targetPackage: String
+    ) {
+        val mediaUri = resolveShareUri(mediaPath)
+            ?: error("Attached media file is missing or inaccessible.")
+        val mimeType = resolveMediaMimeType(mediaPath)
+        val encodedMessage = URLEncoder.encode(message, "UTF-8")
+
+        grantUriPermission(targetPackage, mediaUri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+
+        val textIntent = Intent(
+            Intent.ACTION_VIEW,
+            Uri.parse("https://wa.me/$cleanNumber?text=$encodedMessage")
+        ).apply {
+            setPackage(targetPackage)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        val mediaIntent = Intent(Intent.ACTION_SEND).apply {
+            putExtra(Intent.EXTRA_STREAM, mediaUri)
+            type = mimeType
+            putExtra("jid", "$cleanNumber@s.whatsapp.net")
+            setPackage(targetPackage)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            clipData = ClipData.newRawUri("autonomous_media", mediaUri)
+        }
+
+        startActivity(textIntent)
+        withContext(Dispatchers.IO) {
+            delay(TEXT_TO_MEDIA_DELAY_MS)
+        }
+        startActivity(mediaIntent)
+        withContext(Dispatchers.IO) {
+            delay(postShareDelayFor(mimeType))
+        }
+    }
+
+    private fun resolveShareUri(mediaPath: String): Uri? {
+        return try {
+            when {
+                mediaPath.startsWith("content://", ignoreCase = true) -> Uri.parse(mediaPath)
+                mediaPath.startsWith("file://", ignoreCase = true) -> {
+                    val filePath = Uri.parse(mediaPath).path ?: return null
+                    val file = File(filePath)
+                    if (!file.exists()) return null
+                    FileProvider.getUriForFile(this, "${packageName}.provider", file)
+                }
+                else -> {
+                    val file = File(mediaPath)
+                    if (!file.exists()) return null
+                    FileProvider.getUriForFile(this, "${packageName}.provider", file)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Unable to resolve autonomous media uri: ${e.message}", e)
+            null
+        }
+    }
+
+    private fun resolveMediaMimeType(mediaPath: String): String {
+        return when (mediaPath.substringAfterLast('.', "").lowercase()) {
+            "jpg", "jpeg" -> "image/jpeg"
+            "png" -> "image/png"
+            "gif" -> "image/gif"
+            "webp" -> "image/webp"
+            "mp4" -> "video/mp4"
+            "3gp", "3gpp" -> "video/3gpp"
+            "mkv" -> "video/x-matroska"
+            "avi" -> "video/x-msvideo"
+            "mov" -> "video/quicktime"
+            "pdf" -> "application/pdf"
+            "doc" -> "application/msword"
+            "docx" -> "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            "xls" -> "application/vnd.ms-excel"
+            "xlsx" -> "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            "ppt" -> "application/vnd.ms-powerpoint"
+            "pptx" -> "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+            "txt" -> "text/plain"
+            else -> "*/*"
+        }
+    }
+
+    private fun postShareDelayFor(mimeType: String): Long {
+        return if (mimeType.startsWith("video/")) {
+            VIDEO_POST_SHARE_DELAY_MS
+        } else {
+            DEFAULT_POST_SHARE_DELAY_MS
+        }
+    }
+
     @Suppress("DEPRECATION")
     private fun acquireWakeLock() {
         try {
@@ -511,6 +616,9 @@ class AutonomousCampaignExecutionService : Service() {
         private const val WAKE_LOCK_TIMEOUT_MS = 2 * 60 * 1000L
         private const val MAX_INLINE_SENDS_PER_RUN = 3
         private const val MAX_RETRY_COUNT = 2
+        private const val TEXT_TO_MEDIA_DELAY_MS = 4_000L
+        private const val DEFAULT_POST_SHARE_DELAY_MS = 3_000L
+        private const val VIDEO_POST_SHARE_DELAY_MS = 5_000L
 
         const val ACTION_EXECUTE_AUTONOMOUS_CAMPAIGN = "com.message.bulksend.action.EXECUTE_AUTONOMOUS_CAMPAIGN"
         const val EXTRA_CAMPAIGN_ID = "autonomous_campaign_id"

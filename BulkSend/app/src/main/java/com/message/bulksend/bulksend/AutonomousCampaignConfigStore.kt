@@ -4,7 +4,8 @@ import android.content.Context
 
 data class AutonomousCampaignRuntimeConfig(
     val countryCode: String,
-    val whatsAppPreference: String
+    val whatsAppPreference: String,
+    val hasMediaAttachment: Boolean = false
 )
 
 object AutonomousCampaignConfigStore {
@@ -20,6 +21,7 @@ object AutonomousCampaignConfigStore {
         prefs(context).edit()
             .putString(countryCodeKey(campaignId), config.countryCode)
             .putString(whatsAppPreferenceKey(campaignId), config.whatsAppPreference)
+            .putBoolean(hasMediaKey(campaignId), config.hasMediaAttachment)
             .putString(KEY_ACTIVE_CAMPAIGN_ID, campaignId)
             .apply()
     }
@@ -30,7 +32,8 @@ object AutonomousCampaignConfigStore {
         val whatsAppPreference = prefs.getString(whatsAppPreferenceKey(campaignId), null) ?: return null
         return AutonomousCampaignRuntimeConfig(
             countryCode = countryCode,
-            whatsAppPreference = whatsAppPreference
+            whatsAppPreference = whatsAppPreference,
+            hasMediaAttachment = prefs.getBoolean(hasMediaKey(campaignId), false)
         )
     }
 
@@ -53,6 +56,7 @@ object AutonomousCampaignConfigStore {
         prefs.edit()
             .remove(countryCodeKey(campaignId))
             .remove(whatsAppPreferenceKey(campaignId))
+            .remove(hasMediaKey(campaignId))
             .apply()
 
         if (prefs.getString(KEY_ACTIVE_CAMPAIGN_ID, null) == campaignId) {
@@ -65,4 +69,5 @@ object AutonomousCampaignConfigStore {
 
     private fun countryCodeKey(campaignId: String) = "country_code_$campaignId"
     private fun whatsAppPreferenceKey(campaignId: String) = "whatsapp_pref_$campaignId"
+    private fun hasMediaKey(campaignId: String) = "has_media_$campaignId"
 }

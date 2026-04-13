@@ -1,5 +1,5 @@
 import { Badge, EmptyState } from './AdminUi';
-import { formatDate, statusBadgeClass, statusLabel } from './adminData';
+import { formatCurrencyFromPaise, formatDate, statusBadgeClass, statusLabel } from './adminData';
 
 export default function ManagerDetailPanel({ manager, onClose, onOpenUser, onToggleAccess, isBusy }) {
     return (
@@ -27,7 +27,7 @@ export default function ManagerDetailPanel({ manager, onClose, onOpenUser, onTog
                         <MetricTile label="Customers" value={manager.totalCustomers} />
                         <MetricTile label="Active" value={manager.activeCustomers} tone="success" />
                         <MetricTile label="Expired" value={manager.expiredCustomers} tone="warning" />
-                        <MetricTile label="Free" value={manager.freeCustomers} />
+                        <MetricTile label="Pending Dues" value={manager.pendingAdminReceiptCount || 0} tone="warning" />
                     </section>
 
                     <section className="rounded-lg border border-white/10 bg-dark-800 p-4">
@@ -45,6 +45,7 @@ export default function ManagerDetailPanel({ manager, onClose, onOpenUser, onTog
                         <div className="mt-4 grid gap-3 md:grid-cols-2">
                             <InfoRow label="Last login" value={formatDate(manager.lastLoginMillis, true)} />
                             <InfoRow label="Last activation" value={formatDate(manager.latestActivationMillis, true)} />
+                            <InfoRow label="Latest pending due" value={formatDate(manager.latestPendingActivationMillis, true)} />
                             <InfoRow label="Created" value={formatDate(manager.createdMillis, true)} />
                             <InfoRow label="Updated" value={formatDate(manager.updatedMillis, true)} />
                             <InfoRow label="Created by" value={manager.createdByName || manager.createdByEmail || 'Not recorded'} />
@@ -66,6 +67,57 @@ export default function ManagerDetailPanel({ manager, onClose, onOpenUser, onTog
                                         ? 'Disable Manager Access'
                                         : 'Enable Manager Access'}
                             </button>
+                        </div>
+                    </section>
+
+                    <section className="rounded-lg border border-white/10 bg-dark-800 p-4">
+                        <div className="mb-4">
+                            <p className="text-sm font-semibold text-primary">Manager wallet</p>
+                            <h3 className="text-xl font-bold text-white">Balance and spend</h3>
+                        </div>
+
+                        <div className="grid gap-3 md:grid-cols-4">
+                            <MetricTile label="Balance" value={formatCurrencyFromPaise(manager.walletBalancePaise)} tone="success" />
+                            <MetricTile label="Topup" value={formatCurrencyFromPaise(manager.walletTotalTopupPaise)} />
+                            <MetricTile label="Spent" value={formatCurrencyFromPaise(manager.walletTotalSpentPaise)} tone="warning" />
+                            <MetricTile label="Customers" value={manager.totalCustomers} />
+                        </div>
+
+                        <div className="mt-4 grid gap-3 md:grid-cols-2">
+                            <InfoRow label="Last topup" value={formatDate(manager.walletLastTopupMillis, true)} />
+                            <InfoRow label="Last topup amount" value={formatCurrencyFromPaise(manager.walletLastTopupAmountPaise)} />
+                            <InfoRow label="Last debit" value={formatDate(manager.walletLastDebitMillis, true)} />
+                            <InfoRow label="Last debit amount" value={formatCurrencyFromPaise(manager.walletLastDebitAmountPaise)} />
+                        </div>
+                    </section>
+
+                    <section className="rounded-lg border border-white/10 bg-dark-800 p-4">
+                        <div className="mb-4">
+                            <p className="text-sm font-semibold text-primary">Manager affiliate</p>
+                            <h3 className="text-xl font-bold text-white">Referral link performance</h3>
+                        </div>
+
+                        <div className="grid gap-3 md:grid-cols-3">
+                            <MetricTile label="Clicks" value={manager.referralLinkClicks} />
+                            <MetricTile label="Installs" value={manager.trackedInstalls} tone="success" />
+                            <MetricTile label="Signups" value={manager.trackedRegistrations} />
+                            <MetricTile label="Buyers" value={manager.successfulReferrals} tone="success" />
+                            <MetricTile label="Leads" value={manager.referralCount} tone="warning" />
+                            <MetricTile label="Earnings" value={manager.totalReferralEarnings} tone="success" />
+                        </div>
+
+                        <div className="mt-4 grid gap-3 md:grid-cols-2">
+                            <InfoRow label="Referral code" value={manager.referralCode || 'Not generated yet'} />
+                            <InfoRow label="Pending earnings" value={String(manager.pendingEarnings || 0)} />
+                            <InfoRow label="Withdrawn earnings" value={String(manager.withdrawnEarnings || 0)} />
+                            <InfoRow label="Affiliate updated" value={formatDate(manager.affiliateUpdatedMillis, true)} />
+                        </div>
+
+                        <div className="mt-4 rounded-lg border border-white/10 bg-dark-900 p-3">
+                            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Referral link</p>
+                            <p className="mt-1 break-all text-sm text-slate-100">
+                                {manager.referralLink || 'The manager referral link will appear after the manager opens the affiliate tab once.'}
+                            </p>
                         </div>
                     </section>
 

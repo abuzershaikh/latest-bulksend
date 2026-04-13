@@ -1,4 +1,4 @@
-import { Timestamp, doc, setDoc } from 'firebase/firestore';
+import { Timestamp, doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 
 export const MANAGER_COLLECTION = 'affiliateManagers';
@@ -29,6 +29,8 @@ export async function saveManagerAccount({ name, email, enabled = true }, actor 
     const now = Timestamp.now();
     const displayName = cleanText(name) || normalizedEmail.split('@')[0] || 'Manager';
     const ref = doc(db, MANAGER_COLLECTION, normalizedEmail);
+    const existingSnapshot = await getDoc(ref);
+    const existingData = existingSnapshot.exists() ? existingSnapshot.data() : null;
 
     await setDoc(
         ref,
@@ -36,10 +38,10 @@ export async function saveManagerAccount({ name, email, enabled = true }, actor 
             name: displayName,
             email: normalizedEmail,
             enabled: Boolean(enabled),
-            createdAt: now,
-            createdByName: cleanText(actor.name),
-            createdByEmail: normalizeManagerEmail(actor.email),
-            createdByUid: cleanText(actor.uid),
+            createdAt: existingData?.createdAt || now,
+            createdByName: cleanText(existingData?.createdByName) || cleanText(actor.name),
+            createdByEmail: normalizeManagerEmail(existingData?.createdByEmail) || normalizeManagerEmail(actor.email),
+            createdByUid: cleanText(existingData?.createdByUid) || cleanText(actor.uid),
             updatedAt: now,
             updatedByName: cleanText(actor.name),
             updatedByEmail: normalizeManagerEmail(actor.email),
